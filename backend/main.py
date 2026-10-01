@@ -541,52 +541,101 @@ async def upload_study(
 # ==================================================
 
 @app.post("/api/studies/{file_id}/validate")
-async def validate_image(file_id: str):
+def validate_image(file_id: str):
+    connection = get_connection()
+    cursor = connection.cursor()
 
-    matching_files = list(
-        UPLOAD_DIR.glob(f"{file_id}.*")
+    # Find image in database
+    cursor.execute(
+        """
+        SELECT *
+        FROM medical_images
+        WHERE file_id = ?
+        """,
+        (file_id,)
     )
 
-    if not matching_files:
+    image_record = cursor.fetchone()
+
+    if not image_record:
+        connection.close()
+        raise HTTPException(
+            status_code=404,
+            detail="Image not found"
+        )
+
+    file_path = image_record["file_path"]
+
+    # Check that file exists
+    if not Path(file_path).exists():
+        cursor.execute(
+            """
+            UPDATE medical_images
+            SET validation_status = ?
+            WHERE file_id = ?
+            """,
+            ("Invalid", file_id)
+        )
+
+        connection.commit()
+        connection.close()
 
         raise HTTPException(
             status_code=404,
-            detail="Uploaded file not found"
+            detail="Image file not found"
         )
 
-    file_path = matching_files[0]
-
+    # Try to open and validate the image
     try:
+        image = Image.open(file_path)
 
-        # Verify image
-        with Image.open(file_path) as image:
+        width, height = image.size
+        image_format = image.format
+        mode = image.mode
 
-            image.verify()
+        # Successful validation
+        cursor.execute(
+            """
+            UPDATE medical_images
+            SET validation_status = ?
+            WHERE file_id = ?
+            """,
+            ("Valid", file_id)
+        )
 
-        # Read image information
-        with Image.open(file_path) as image:
-
-            width, height = image.size
-
-            image_format = image.format
-
-            mode = image.mode
+        connection.commit()
+        connection.close()
 
         return {
             "file_id": file_id,
             "valid": True,
+            "validation_status": "Valid",
             "width": width,
             "height": height,
             "format": image_format,
             "mode": mode
         }
 
-    except Exception:
+    except Exception as error:
+
+        # Failed validation
+        cursor.execute(
+            """
+            UPDATE medical_images
+            SET validation_status = ?
+            WHERE file_id = ?
+            """,
+            ("Invalid", file_id)
+        )
+
+        connection.commit()
+        connection.close()
 
         return {
             "file_id": file_id,
             "valid": False,
-            "message": "Image is corrupted or cannot be read"
+            "validation_status": "Invalid",
+            "message": str(error)
         }
 
 
