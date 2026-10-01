@@ -1,0 +1,24 @@
+# Python cache
+_pycache_/
+*.pyc
+
+# Virtual environments
+venv/
+.venv/
+
+# Uploaded medical images
+uploads/
+backend/uploads/
+
+# Environment/secrets
+.env
+
+# Node
+node_modules/
+
+# VS Code
+.vscode/
+
+# OS files
+Thumbs.db
+.DS_Store
