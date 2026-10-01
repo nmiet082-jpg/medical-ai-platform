@@ -1,15 +1,34 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
+from database import get_connection, create_tables
 from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
 from PIL import Image
+from pydantic import BaseModel
 import shutil
 import uuid
 import numpy as np
+
+
+# --------------------------------------------------
+# FastAPI Application
+# --------------------------------------------------
 
 app = FastAPI(
     title="AI Medical Imaging Triage & XAI",
     version="1.0.0"
 )
+
+
+# --------------------------------------------------
+# Create Database Tables
+# --------------------------------------------------
+
+create_tables()
+
+
+# --------------------------------------------------
+# CORS
+# --------------------------------------------------
 
 app.add_middleware(
     CORSMiddleware,
@@ -19,13 +38,51 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Folder where uploaded images will be stored
+
+# --------------------------------------------------
+# Upload Folder
+# --------------------------------------------------
+
 UPLOAD_DIR = Path("uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
 
-# Initial prototype file types
-ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".dcm"}
 
+# --------------------------------------------------
+# Allowed File Types
+# --------------------------------------------------
+
+ALLOWED_EXTENSIONS = {
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".dcm"
+}
+
+
+# ==================================================
+# PATIENT MODEL
+# ==================================================
+
+class PatientCreate(BaseModel):
+    patient_id: str
+    name: str
+    age: int
+    gender: str
+
+
+# ==================================================
+# STUDY MODEL
+# ==================================================
+
+class StudyCreate(BaseModel):
+    patient_id: int
+    study_type: str
+    study_date: str
+
+
+# ==================================================
+# BASIC ENDPOINTS
+# ==================================================
 
 @app.get("/")
 def root():
@@ -42,41 +99,456 @@ def health():
     }
 
 
+# ==================================================
+# PATIENT MANAGEMENT
+# ==================================================
+
+# --------------------------------------------------
+# Create Patient
+# --------------------------------------------------
+
+@app.post("/api/patients")
+def create_patient(patient: PatientCreate):
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    try:
+
+        cursor.execute(
+            """
+            INSERT INTO patients (
+                patient_id,
+                name,
+                age,
+                gender
+            )
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                patient.patient_id,
+                patient.name,
+                patient.age,
+                patient.gender
+            )
+        )
+
+        connection.commit()
+
+        return {
+            "message": "Patient created successfully",
+            "patient_id": patient.patient_id
+        }
+
+    except Exception as e:
+
+        connection.rollback()
+
+        raise HTTPException(
+            status_code=400,
+            detail=str(e)
+        )
+
+    finally:
+
+        connection.close()
+
+
+# --------------------------------------------------
+# Get All Patients
+# --------------------------------------------------
+
+@app.get("/api/patients")
+def get_patients():
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    cursor.execute(
+        """
+        SELECT *
+        FROM patients
+        ORDER BY id DESC
+        """
+    )
+
+    rows = cursor.fetchall()
+
+    connection.close()
+
+    return {
+        "count": len(rows),
+        "patients": [dict(row) for row in rows]
+    }
+
+
+# --------------------------------------------------
+# Get One Patient
+# --------------------------------------------------
+
+@app.get("/api/patients/{patient_id}")
+def get_patient(patient_id: int):
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    cursor.execute(
+        """
+        SELECT *
+        FROM patients
+        WHERE id = ?
+        """,
+        (patient_id,)
+    )
+
+    row = cursor.fetchone()
+
+    connection.close()
+
+    if row is None:
+
+        raise HTTPException(
+            status_code=404,
+            detail="Patient not found"
+        )
+
+    return dict(row)
+
+
+# ==================================================
+# STUDY MANAGEMENT
+# ==================================================
+
+# --------------------------------------------------
+# Create Study
+# --------------------------------------------------
+
+@app.post("/api/studies")
+def create_study(study: StudyCreate):
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    try:
+
+        # Check whether patient exists
+        cursor.execute(
+            """
+            SELECT id
+            FROM patients
+            WHERE id = ?
+            """,
+            (study.patient_id,)
+        )
+
+        patient = cursor.fetchone()
+
+        if patient is None:
+
+            raise HTTPException(
+                status_code=404,
+                detail="Patient not found"
+            )
+
+        # Create study
+        cursor.execute(
+            """
+            INSERT INTO studies (
+                patient_id,
+                study_type,
+                study_date
+            )
+            VALUES (?, ?, ?)
+            """,
+            (
+                study.patient_id,
+                study.study_type,
+                study.study_date
+            )
+        )
+
+        connection.commit()
+
+        study_id = cursor.lastrowid
+
+        return {
+            "message": "Study created successfully",
+            "study_id": study_id,
+            "patient_id": study.patient_id,
+            "study_type": study.study_type,
+            "study_date": study.study_date
+        }
+
+    except HTTPException:
+
+        connection.rollback()
+        raise
+
+    except Exception as e:
+
+        connection.rollback()
+
+        raise HTTPException(
+            status_code=400,
+            detail=str(e)
+        )
+
+    finally:
+
+        connection.close()
+
+
+# --------------------------------------------------
+# Get All Studies
+# --------------------------------------------------
+
+@app.get("/api/studies")
+def get_studies():
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    cursor.execute(
+        """
+        SELECT
+            studies.id,
+            studies.patient_id,
+            patients.patient_id AS patient_code,
+            patients.name AS patient_name,
+            studies.study_type,
+            studies.study_date,
+            studies.created_at
+        FROM studies
+        JOIN patients
+            ON studies.patient_id = patients.id
+        ORDER BY studies.id DESC
+        """
+    )
+
+    rows = cursor.fetchall()
+
+    connection.close()
+
+    return {
+        "count": len(rows),
+        "studies": [dict(row) for row in rows]
+    }
+
+
+# ==================================================
+# DATABASE IMAGE RECORDS
+# IMPORTANT:
+# This route must come BEFORE /api/studies/{study_id}
+# ==================================================
+
+@app.get("/api/studies/database")
+def get_database_images():
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    cursor.execute(
+        """
+        SELECT *
+        FROM medical_images
+        ORDER BY id DESC
+        """
+    )
+
+    rows = cursor.fetchall()
+
+    connection.close()
+
+    return {
+        "count": len(rows),
+        "images": [dict(row) for row in rows]
+    }
+
+
+# --------------------------------------------------
+# Get One Study
+# --------------------------------------------------
+
+@app.get("/api/studies/{study_id}")
+def get_study(study_id: int):
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    cursor.execute(
+        """
+        SELECT
+            studies.id,
+            studies.patient_id,
+            patients.patient_id AS patient_code,
+            patients.name AS patient_name,
+            patients.age,
+            patients.gender,
+            studies.study_type,
+            studies.study_date,
+            studies.created_at
+        FROM studies
+        JOIN patients
+            ON studies.patient_id = patients.id
+        WHERE studies.id = ?
+        """,
+        (study_id,)
+    )
+
+    row = cursor.fetchone()
+
+    connection.close()
+
+    if row is None:
+
+        raise HTTPException(
+            status_code=404,
+            detail="Study not found"
+        )
+
+    return dict(row)
+
+
+# ==================================================
+# MEDICAL IMAGE UPLOAD
+# ==================================================
+
 @app.post("/api/studies/upload")
-async def upload_study(file: UploadFile = File(...)):
+async def upload_study(
+    file: UploadFile = File(...),
+    study_id: int | None = None
+):
 
     # Check file extension
     extension = Path(file.filename).suffix.lower()
 
     if extension not in ALLOWED_EXTENSIONS:
+
         raise HTTPException(
             status_code=400,
             detail="Unsupported file type"
         )
 
-    # Create a unique filename
-    file_id = str(uuid.uuid4())
-    saved_filename = f"{file_id}{extension}"
-    file_path = UPLOAD_DIR / saved_filename
+    connection = get_connection()
+    cursor = connection.cursor()
 
-    # Save the uploaded file
-    with file_path.open("wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    try:
 
-    return {
-        "message": "File uploaded successfully",
-        "file_id": file_id,
-        "filename": file.filename,
-        "saved_as": saved_filename
-    }
+        # --------------------------------------------------
+        # Check whether study exists
+        # --------------------------------------------------
 
+        if study_id is not None:
+
+            cursor.execute(
+                """
+                SELECT id
+                FROM studies
+                WHERE id = ?
+                """,
+                (study_id,)
+            )
+
+            study = cursor.fetchone()
+
+            if study is None:
+
+                raise HTTPException(
+                    status_code=404,
+                    detail="Study not found"
+                )
+
+        # --------------------------------------------------
+        # Create unique file ID
+        # --------------------------------------------------
+
+        file_id = str(uuid.uuid4())
+
+        saved_filename = f"{file_id}{extension}"
+
+        file_path = UPLOAD_DIR / saved_filename
+
+        # --------------------------------------------------
+        # Save uploaded file
+        # --------------------------------------------------
+
+        with file_path.open("wb") as buffer:
+
+            shutil.copyfileobj(
+                file.file,
+                buffer
+            )
+
+        # --------------------------------------------------
+        # Save image information in SQLite
+        # --------------------------------------------------
+
+        cursor.execute(
+            """
+            INSERT INTO medical_images (
+                study_id,
+                file_id,
+                original_filename,
+                stored_filename,
+                file_path,
+                file_type,
+                validation_status
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                study_id,
+                file_id,
+                file.filename,
+                saved_filename,
+                str(file_path),
+                extension,
+                "Pending"
+            )
+        )
+
+        connection.commit()
+
+        return {
+            "message": "File uploaded successfully",
+            "file_id": file_id,
+            "study_id": study_id,
+            "filename": file.filename,
+            "saved_as": saved_filename
+        }
+
+    except HTTPException:
+
+        connection.rollback()
+        raise
+
+    except Exception as e:
+
+        connection.rollback()
+
+        raise HTTPException(
+            status_code=400,
+            detail=str(e)
+        )
+
+    finally:
+
+        connection.close()
+
+
+# ==================================================
+# IMAGE VALIDATION
+# ==================================================
 
 @app.post("/api/studies/{file_id}/validate")
 async def validate_image(file_id: str):
 
-    matching_files = list(UPLOAD_DIR.glob(f"{file_id}.*"))
+    matching_files = list(
+        UPLOAD_DIR.glob(f"{file_id}.*")
+    )
 
     if not matching_files:
+
         raise HTTPException(
             status_code=404,
             detail="Uploaded file not found"
@@ -85,12 +557,19 @@ async def validate_image(file_id: str):
     file_path = matching_files[0]
 
     try:
+
+        # Verify image
         with Image.open(file_path) as image:
+
             image.verify()
 
+        # Read image information
         with Image.open(file_path) as image:
+
             width, height = image.size
+
             image_format = image.format
+
             mode = image.mode
 
         return {
@@ -103,6 +582,7 @@ async def validate_image(file_id: str):
         }
 
     except Exception:
+
         return {
             "file_id": file_id,
             "valid": False,
@@ -110,12 +590,19 @@ async def validate_image(file_id: str):
         }
 
 
+# ==================================================
+# IMAGE PREPROCESSING
+# ==================================================
+
 @app.post("/api/studies/{file_id}/preprocess")
 async def preprocess_image(file_id: str):
 
-    matching_files = list(UPLOAD_DIR.glob(f"{file_id}.*"))
+    matching_files = list(
+        UPLOAD_DIR.glob(f"{file_id}.*")
+    )
 
     if not matching_files:
+
         raise HTTPException(
             status_code=404,
             detail="Uploaded file not found"
@@ -124,30 +611,41 @@ async def preprocess_image(file_id: str):
     file_path = matching_files[0]
 
     try:
+
         with Image.open(file_path) as image:
 
-            # Convert to RGB
+            # Convert image to RGB
             image = image.convert("RGB")
 
-            # Resize to a standard size
-            image = image.resize((224, 224))
+            # Resize image
+            image = image.resize(
+                (224, 224)
+            )
 
             # Convert image to NumPy array
             image_array = np.array(image)
 
-            # Normalize pixel values from 0-255 to 0-1
-            normalized = image_array.astype(np.float32) / 255.0
+            # Normalize pixels
+            normalized = (
+                image_array.astype(np.float32)
+                / 255.0
+            )
 
             return {
                 "file_id": file_id,
                 "preprocessed": True,
                 "size": [224, 224],
                 "channels": 3,
-                "min_pixel_value": float(normalized.min()),
-                "max_pixel_value": float(normalized.max())
+                "min_pixel_value": float(
+                    normalized.min()
+                ),
+                "max_pixel_value": float(
+                    normalized.max()
+                )
             }
 
     except Exception as e:
+
         raise HTTPException(
             status_code=400,
             detail=f"Preprocessing failed: {str(e)}"
