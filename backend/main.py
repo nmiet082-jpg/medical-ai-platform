@@ -1,6 +1,7 @@
-from PIL import Image
 from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
+from PIL import Image
 import shutil
 import uuid
 import numpy as np
@@ -8,6 +9,14 @@ import numpy as np
 app = FastAPI(
     title="AI Medical Imaging Triage & XAI",
     version="1.0.0"
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Folder where uploaded images will be stored
