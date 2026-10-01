@@ -1,0 +1,3366 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>
+        AI Medical Imaging Triage Platform
+    </title>
+
+
+    <style>
+
+        /* =====================================================
+           GLOBAL
+        ===================================================== */
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+
+        body {
+            font-family:
+                Arial,
+                Helvetica,
+                sans-serif;
+
+            background: #f4f7fb;
+
+            color: #1e293b;
+        }
+
+
+        button,
+        input,
+        select {
+            font-family: inherit;
+        }
+
+
+        /* =====================================================
+           LOGIN PAGE
+        ===================================================== */
+
+        #loginPage {
+            min-height: 100vh;
+
+            display: flex;
+
+            justify-content: center;
+
+            align-items: center;
+
+            background:
+                linear-gradient(
+                    135deg,
+                    #0f172a,
+                    #2563eb
+                );
+
+            padding: 20px;
+        }
+
+
+        .login-box {
+            width: 100%;
+
+            max-width: 430px;
+
+            background: white;
+
+            padding: 40px;
+
+            border-radius: 18px;
+
+            box-shadow:
+                0 20px 50px
+                rgba(0, 0, 0, 0.25);
+        }
+
+
+        .login-logo {
+            text-align: center;
+
+            font-size: 45px;
+
+            margin-bottom: 10px;
+        }
+
+
+        .login-box h1 {
+            text-align: center;
+
+            color: #0f172a;
+
+            margin-bottom: 8px;
+        }
+
+
+        .login-subtitle {
+            text-align: center;
+
+            color: #64748b;
+
+            margin-bottom: 30px;
+        }
+
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+
+        .form-group label {
+            display: block;
+
+            font-weight: 600;
+
+            margin-bottom: 8px;
+
+            color: #334155;
+        }
+
+
+        .form-group input,
+        .form-group select {
+            width: 100%;
+
+            padding: 13px 14px;
+
+            border: 1px solid #cbd5e1;
+
+            border-radius: 8px;
+
+            font-size: 15px;
+
+            outline: none;
+
+            transition: 0.2s;
+        }
+
+
+        .form-group input:focus,
+        .form-group select:focus {
+            border-color: #2563eb;
+
+            box-shadow:
+                0 0 0 3px
+                rgba(37, 99, 235, 0.1);
+        }
+
+
+        .login-button {
+            width: 100%;
+
+            padding: 14px;
+
+            border: none;
+
+            border-radius: 8px;
+
+            background: #2563eb;
+
+            color: white;
+
+            font-size: 16px;
+
+            font-weight: 600;
+
+            cursor: pointer;
+
+            transition: 0.2s;
+        }
+
+
+        .login-button:hover {
+            background: #1d4ed8;
+        }
+
+
+        .login-note {
+            margin-top: 18px;
+
+            text-align: center;
+
+            font-size: 13px;
+
+            color: #64748b;
+        }
+
+
+        /* =====================================================
+           APPLICATION
+        ===================================================== */
+
+        #app {
+            display: none;
+
+            min-height: 100vh;
+        }
+
+
+        /* =====================================================
+           SIDEBAR
+        ===================================================== */
+
+        .sidebar {
+            position: fixed;
+
+            left: 0;
+
+            top: 0;
+
+            bottom: 0;
+
+            width: 280px;
+
+            background: #0f172a;
+
+            color: white;
+
+            padding: 25px 15px;
+
+            overflow-y: auto;
+        }
+
+
+        .brand {
+            padding: 5px 12px 25px;
+
+            border-bottom:
+                1px solid
+                rgba(255, 255, 255, 0.1);
+
+            margin-bottom: 20px;
+        }
+
+
+        .brand-title {
+            font-size: 21px;
+
+            font-weight: 700;
+        }
+
+
+        .brand-subtitle {
+            color: #94a3b8;
+
+            margin-top: 5px;
+
+            font-size: 14px;
+        }
+
+
+        .nav-item {
+            width: 100%;
+
+            border: none;
+
+            background: transparent;
+
+            color: #dbeafe;
+
+            padding: 14px 15px;
+
+            border-radius: 9px;
+
+            text-align: left;
+
+            font-size: 15px;
+
+            cursor: pointer;
+
+            margin-bottom: 7px;
+
+            transition: 0.2s;
+        }
+
+
+        .nav-item:hover {
+            background: #1e293b;
+        }
+
+
+        .nav-item.active {
+            background: #2563eb;
+
+            color: white;
+        }
+
+
+        .logout-button {
+            color: #fca5a5;
+
+            margin-top: 20px;
+        }
+
+
+        .logout-button:hover {
+            background: #450a0a;
+        }
+
+
+        /* =====================================================
+           MAIN CONTENT
+        ===================================================== */
+
+        .main-content {
+            margin-left: 280px;
+
+            min-height: 100vh;
+        }
+
+
+        .topbar {
+            height: 75px;
+
+            background: white;
+
+            border-bottom:
+                1px solid #e2e8f0;
+
+            display: flex;
+
+            justify-content: flex-end;
+
+            align-items: center;
+
+            padding: 0 30px;
+        }
+
+
+        .user-info {
+            text-align: right;
+        }
+
+
+        .username {
+            font-weight: 700;
+
+            color: #0f172a;
+        }
+
+
+        .user-role {
+            font-size: 13px;
+
+            color: #64748b;
+
+            margin-top: 3px;
+        }
+
+
+        /* =====================================================
+           PAGE
+        ===================================================== */
+
+        .page {
+            display: none;
+
+            padding: 35px;
+
+            max-width: 1400px;
+
+            margin: auto;
+        }
+
+
+        .page.active {
+            display: block;
+        }
+
+
+        .page-title {
+            margin-bottom: 25px;
+        }
+
+
+        .page-title h1 {
+            font-size: 32px;
+
+            color: #0f172a;
+
+            margin-bottom: 7px;
+        }
+
+
+        .page-title p {
+            color: #64748b;
+
+            font-size: 16px;
+        }
+
+
+        /* =====================================================
+           DASHBOARD WELCOME
+        ===================================================== */
+
+        .welcome-card {
+            background:
+                linear-gradient(
+                    135deg,
+                    #2563eb,
+                    #0f766e
+                );
+
+            color: white;
+
+            padding: 35px;
+
+            border-radius: 16px;
+
+            margin-bottom: 25px;
+        }
+
+
+        .welcome-card h2 {
+            font-size: 32px;
+
+            margin-bottom: 10px;
+        }
+
+
+        .welcome-card p {
+            font-size: 17px;
+
+            opacity: 0.95;
+        }
+
+
+        /* =====================================================
+           DASHBOARD CARDS
+        ===================================================== */
+
+        .stats-grid {
+            display: grid;
+
+            grid-template-columns:
+                repeat(
+                    3,
+                    minmax(0, 1fr)
+                );
+
+            gap: 22px;
+
+            margin-bottom: 25px;
+        }
+
+
+        .stat-card {
+            background: white;
+
+            padding: 25px;
+
+            border-radius: 14px;
+
+            border:
+                1px solid #e2e8f0;
+
+            box-shadow:
+                0 5px 15px
+                rgba(15, 23, 42, 0.05);
+        }
+
+
+        .stat-icon {
+            width: 50px;
+
+            height: 50px;
+
+            background: #dbeafe;
+
+            border-radius: 10px;
+
+            display: flex;
+
+            align-items: center;
+
+            justify-content: center;
+
+            font-size: 25px;
+
+            margin-bottom: 18px;
+        }
+
+
+        .stat-number {
+            font-size: 30px;
+
+            font-weight: 700;
+
+            color: #0f172a;
+
+            margin-bottom: 5px;
+        }
+
+
+        .stat-label {
+            color: #64748b;
+        }
+
+
+        /* =====================================================
+           SECTION CARD
+        ===================================================== */
+
+        .section-card {
+            background: white;
+
+            border-radius: 14px;
+
+            border:
+                1px solid #e2e8f0;
+
+            padding: 25px;
+
+            margin-bottom: 25px;
+
+            box-shadow:
+                0 5px 15px
+                rgba(15, 23, 42, 0.04);
+        }
+
+
+        .section-card h2 {
+            margin-bottom: 20px;
+
+            color: #0f172a;
+        }
+
+
+        /* =====================================================
+           BUTTONS
+        ===================================================== */
+
+        .btn {
+            border: none;
+
+            border-radius: 8px;
+
+            padding: 11px 18px;
+
+            cursor: pointer;
+
+            font-weight: 600;
+
+            transition: 0.2s;
+
+            margin-right: 8px;
+        }
+
+
+        .btn-primary {
+            background: #2563eb;
+
+            color: white;
+        }
+
+
+        .btn-primary:hover {
+            background: #1d4ed8;
+        }
+
+
+        .btn-secondary {
+            background: #e2e8f0;
+
+            color: #334155;
+        }
+
+
+        .btn-secondary:hover {
+            background: #cbd5e1;
+        }
+
+
+        .btn-success {
+            background: #16a34a;
+
+            color: white;
+        }
+
+
+        .btn-success:hover {
+            background: #15803d;
+        }
+
+
+        .btn-danger {
+            background: #dc2626;
+
+            color: white;
+        }
+
+
+        .btn-danger:hover {
+            background: #b91c1c;
+        }
+
+
+        .btn-small {
+            padding: 7px 11px;
+
+            font-size: 13px;
+        }
+
+
+        /* =====================================================
+           PATIENT FORM
+        ===================================================== */
+
+        .form-grid {
+            display: grid;
+
+            grid-template-columns:
+                repeat(
+                    2,
+                    minmax(0, 1fr)
+                );
+
+            gap: 20px;
+        }
+
+
+        /* =====================================================
+           SEARCH
+        ===================================================== */
+
+        .search-box {
+            margin-bottom: 20px;
+        }
+
+
+        .search-box input {
+            width: 100%;
+
+            padding: 13px;
+
+            border:
+                1px solid #cbd5e1;
+
+            border-radius: 8px;
+
+            outline: none;
+
+            font-size: 15px;
+        }
+
+
+        /* =====================================================
+           TABLE
+        ===================================================== */
+
+        .table-container {
+            overflow-x: auto;
+        }
+
+
+        table {
+            width: 100%;
+
+            border-collapse: collapse;
+
+            min-width: 800px;
+        }
+
+
+        th {
+            background: #f1f5f9;
+
+            color: #334155;
+
+            padding: 13px;
+
+            text-align: left;
+
+            font-size: 14px;
+        }
+
+
+        td {
+            padding: 13px;
+
+            border-bottom:
+                1px solid #e2e8f0;
+
+            color: #475569;
+
+            font-size: 14px;
+        }
+
+
+        tr:hover td {
+            background: #f8fafc;
+        }
+
+
+        /* =====================================================
+           STATUS
+        ===================================================== */
+
+        .status {
+            display: inline-block;
+
+            padding: 5px 10px;
+
+            border-radius: 20px;
+
+            background: #dcfce7;
+
+            color: #166534;
+
+            font-size: 12px;
+
+            font-weight: 600;
+        }
+
+
+        .status-error {
+            background: #fee2e2;
+
+            color: #991b1b;
+        }
+
+
+        .result-row {
+            display: flex;
+
+            justify-content: space-between;
+
+            gap: 15px;
+
+            padding: 12px 0;
+
+            border-bottom:
+                1px solid #e2e8f0;
+        }
+
+
+        .result-label {
+            font-weight: 600;
+
+            color: #334155;
+        }
+
+
+        .result-value {
+            color: #475569;
+
+            text-align: right;
+        }
+
+
+        /* =====================================================
+           UPLOAD BOX
+        ===================================================== */
+
+        .upload-box {
+            border:
+                2px dashed #93c5fd;
+
+            background: #eff6ff;
+
+            border-radius: 12px;
+
+            padding: 30px;
+
+            text-align: center;
+
+            margin-bottom: 20px;
+        }
+
+
+        .upload-icon {
+            font-size: 45px;
+
+            margin-bottom: 10px;
+        }
+
+
+        .upload-box p {
+            color: #64748b;
+
+            margin-bottom: 15px;
+        }
+
+
+        .file-input {
+            width: 100%;
+
+            padding: 12px;
+
+            background: white;
+
+            border:
+                1px solid #cbd5e1;
+
+            border-radius: 8px;
+        }
+
+
+        /* =====================================================
+           RESPONSIVE
+        ===================================================== */
+
+        @media (max-width: 900px) {
+
+            .sidebar {
+                width: 220px;
+            }
+
+
+            .main-content {
+                margin-left: 220px;
+            }
+
+
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+
+
+            .form-grid {
+                grid-template-columns: 1fr;
+            }
+
+        }
+
+
+        @media (max-width: 650px) {
+
+            .sidebar {
+                position: relative;
+
+                width: 100%;
+
+                min-height: auto;
+            }
+
+
+            .main-content {
+                margin-left: 0;
+            }
+
+
+            .topbar {
+                justify-content: center;
+            }
+
+
+            .page {
+                padding: 20px;
+            }
+
+        }
+
+    </style>
+
+</head>
+
+
+<body>
+
+
+    <!-- =====================================================
+         LOGIN PAGE
+    ====================================================== -->
+
+    <div id="loginPage">
+
+        <div class="login-box">
+
+            <div class="login-logo">
+                🏥
+            </div>
+
+
+            <h1>
+                Medical Imaging Platform
+            </h1>
+
+
+            <p class="login-subtitle">
+                AI-Based Triage & Explainable Abnormality Detection
+            </p>
+
+
+            <form onsubmit="login(event)">
+
+                <div class="form-group">
+
+                    <label for="username">
+                        Username
+                    </label>
+
+                    <input
+                        type="text"
+                        id="username"
+                        placeholder="Enter username"
+                        required
+                    >
+
+                </div>
+
+
+                <div class="form-group">
+
+                    <label for="password">
+                        Password
+                    </label>
+
+                    <input
+                        type="password"
+                        id="password"
+                        placeholder="Enter password"
+                        required
+                    >
+
+                </div>
+
+
+                <div class="form-group">
+
+                    <label for="role">
+                        Role
+                    </label>
+
+                    <select
+                        id="role"
+                        required
+                    >
+
+                        <option value="">
+                            Select Role
+                        </option>
+
+                        <option value="Admin">
+                            Administrator
+                        </option>
+
+                        <option value="Radiologist">
+                            Radiologist
+                        </option>
+
+                        <option value="Technician">
+                            Technician
+                        </option>
+
+                    </select>
+
+                </div>
+
+
+                <button
+                    type="submit"
+                    class="login-button"
+                >
+                    Login
+                </button>
+
+            </form>
+
+
+            <p class="login-note">
+                Frontend prototype for academic project.
+            </p>
+
+        </div>
+
+    </div>
+
+
+    <!-- =====================================================
+         MAIN APPLICATION
+    ====================================================== -->
+
+    <div id="app">
+
+
+        <!-- =================================================
+             SIDEBAR
+        ================================================== -->
+
+        <aside class="sidebar">
+
+            <div class="brand">
+
+                <div class="brand-title">
+                    🏥 Medical Imaging
+                </div>
+
+                <div class="brand-subtitle">
+                    AI Triage Platform
+                </div>
+
+            </div>
+
+
+            <button
+                class="nav-item active"
+                onclick="showPage('dashboardPage', this)"
+            >
+                🏠 Dashboard
+            </button>
+
+
+            <button
+                class="nav-item"
+                onclick="showPage('patientPage', this)"
+            >
+                👤 Patient Management
+            </button>
+
+
+            <button
+                class="nav-item"
+                onclick="showPage('imagesPage', this)"
+            >
+                🖼️ Medical Images
+            </button>
+
+
+            <button
+                class="nav-item"
+                onclick="showPage('analysisPage', this)"
+            >
+                🤖 AI Analysis
+            </button>
+
+
+            <button
+                class="nav-item"
+                onclick="showPage('reportsPage', this)"
+            >
+                📊 Reports
+            </button>
+
+
+            <button
+                id="userManagementNav"
+                class="nav-item"
+                onclick="showPage('usersPage', this)"
+            >
+                👥 User Management
+            </button>
+
+
+            <button
+                class="nav-item logout-button"
+                onclick="logout()"
+            >
+                🚪 Logout
+            </button>
+
+        </aside>
+
+
+        <!-- =================================================
+             MAIN CONTENT
+        ================================================== -->
+
+        <main class="main-content">
+
+
+            <!-- =============================================
+                 TOP BAR
+            ============================================== -->
+
+            <header class="topbar">
+
+                <div class="user-info">
+
+                    <div
+                        class="username"
+                        id="loggedUsername"
+                    >
+                    </div>
+
+                    <div
+                        class="user-role"
+                        id="loggedRole"
+                    >
+                    </div>
+
+                </div>
+
+            </header>
+
+
+            <!-- =============================================
+                 DASHBOARD
+            ============================================== -->
+
+            <section
+                id="dashboardPage"
+                class="page active"
+            >
+
+                <div class="page-title">
+
+                    <h1>
+                        Dashboard
+                    </h1>
+
+                    <p>
+                        Overview of the AI Medical Imaging Platform
+                    </p>
+
+                </div>
+
+
+                <div class="welcome-card">
+
+                    <h2>
+                        Welcome,
+                        <span id="welcomeUsername">
+                        </span>!
+                    </h2>
+
+                    <p>
+                        You are logged in as
+                        <strong id="welcomeRole">
+                        </strong>.
+                    </p>
+
+                </div>
+
+
+                <div class="stats-grid">
+
+
+                    <div class="stat-card">
+
+                        <div class="stat-icon">
+                            👤
+                        </div>
+
+                        <div
+                            class="stat-number"
+                            id="totalPatients"
+                        >
+                            0
+                        </div>
+
+                        <div class="stat-label">
+                            Total Patients
+                        </div>
+
+                    </div>
+
+
+                    <div class="stat-card">
+
+                        <div class="stat-icon">
+                            🖼️
+                        </div>
+
+                        <div
+                            class="stat-number"
+                            id="totalStudies"
+                        >
+                            0
+                        </div>
+
+                        <div class="stat-label">
+                            Total Imaging Studies
+                        </div>
+
+                    </div>
+
+
+                    <div class="stat-card">
+
+                        <div class="stat-icon">
+                            🔐
+                        </div>
+
+                        <div
+                            class="stat-number"
+                            id="currentRole"
+                        >
+                            -
+                        </div>
+
+                        <div class="stat-label">
+                            Current Role
+                        </div>
+
+                    </div>
+
+                </div>
+
+            </section>
+
+
+            <!-- =============================================
+                 PATIENT MANAGEMENT
+            ============================================== -->
+
+            <section
+                id="patientPage"
+                class="page"
+            >
+
+                <div class="page-title">
+
+                    <h1>
+                        Patient Management
+                    </h1>
+
+                    <p>
+                        Create, view, update and search patient records
+                    </p>
+
+                </div>
+
+
+                <div class="section-card">
+
+                    <h2>
+                        Patient Information
+                    </h2>
+
+
+                    <form
+                        onsubmit="savePatient(event)"
+                    >
+
+                        <div class="form-grid">
+
+
+                            <div class="form-group">
+
+                                <label>
+                                    Patient ID
+                                </label>
+
+                                <input
+                                    type="text"
+                                    id="patientId"
+                                    placeholder="Enter patient ID"
+                                    required
+                                >
+
+                            </div>
+
+
+                            <div class="form-group">
+
+                                <label>
+                                    Patient Name
+                                </label>
+
+                                <input
+                                    type="text"
+                                    id="patientName"
+                                    placeholder="Enter patient name"
+                                    required
+                                >
+
+                            </div>
+
+
+                            <div class="form-group">
+
+                                <label>
+                                    Age
+                                </label>
+
+                                <input
+                                    type="number"
+                                    id="patientAge"
+                                    min="0"
+                                    max="150"
+                                    placeholder="Enter age"
+                                    required
+                                >
+
+                            </div>
+
+
+                            <div class="form-group">
+
+                                <label>
+                                    Gender
+                                </label>
+
+                                <select
+                                    id="patientGender"
+                                    required
+                                >
+
+                                    <option value="">
+                                        Select Gender
+                                    </option>
+
+                                    <option value="Male">
+                                        Male
+                                    </option>
+
+                                    <option value="Female">
+                                        Female
+                                    </option>
+
+                                    <option value="Other">
+                                        Other
+                                    </option>
+
+                                </select>
+
+                            </div>
+
+
+                            <div class="form-group">
+
+                                <label>
+                                    Study Type
+                                </label>
+
+                                <select
+                                    id="studyType"
+                                    required
+                                >
+
+                                    <option value="">
+                                        Select Study Type
+                                    </option>
+
+                                    <option value="X-Ray">
+                                        X-Ray
+                                    </option>
+
+                                    <option value="CT Scan">
+                                        CT Scan
+                                    </option>
+
+                                    <option value="MRI">
+                                        MRI
+                                    </option>
+
+                                    <option value="Ultrasound">
+                                        Ultrasound
+                                    </option>
+
+                                </select>
+
+                            </div>
+
+
+                            <div class="form-group">
+
+                                <label>
+                                    Study Date
+                                </label>
+
+                                <input
+                                    type="date"
+                                    id="studyDate"
+                                    required
+                                >
+
+                            </div>
+
+                        </div>
+
+
+                        <button
+                            type="submit"
+                            class="btn btn-primary"
+                            id="savePatientButton"
+                        >
+                            Save Patient
+                        </button>
+
+
+                        <button
+                            type="button"
+                            class="btn btn-secondary"
+                            onclick="clearPatientForm()"
+                        >
+                            Clear
+                        </button>
+
+                    </form>
+
+                </div>
+
+
+                <div class="section-card">
+
+                    <h2>
+                        Patient Records
+                    </h2>
+
+
+                    <div class="search-box">
+
+                        <input
+                            type="text"
+                            id="patientSearch"
+                            placeholder="Search by patient ID, name or study type..."
+                            oninput="searchPatients()"
+                        >
+
+                    </div>
+
+
+                    <div class="table-container">
+
+                        <table>
+
+                            <thead>
+
+                                <tr>
+
+                                    <th>
+                                        Patient ID
+                                    </th>
+
+                                    <th>
+                                        Name
+                                    </th>
+
+                                    <th>
+                                        Age
+                                    </th>
+
+                                    <th>
+                                        Gender
+                                    </th>
+
+                                    <th>
+                                        Study Type
+                                    </th>
+
+                                    <th>
+                                        Study Date
+                                    </th>
+
+                                    <th>
+                                        Status
+                                    </th>
+
+                                    <th>
+                                        Actions
+                                    </th>
+
+                                </tr>
+
+                            </thead>
+
+
+                            <tbody id="patientTableBody">
+                            </tbody>
+
+                        </table>
+
+                    </div>
+
+                </div>
+
+            </section>
+
+
+            <!-- =============================================
+                 MEDICAL IMAGES
+            ============================================== -->
+
+            <section
+                id="imagesPage"
+                class="page"
+            >
+
+                <div class="page-title">
+
+                    <h1>
+                        Medical Images
+                    </h1>
+
+                    <p>
+                        Upload and validate medical imaging studies
+                    </p>
+
+                </div>
+
+
+                <div class="section-card">
+
+                    <h2>
+                        Upload Medical Image
+                    </h2>
+
+
+                    <div class="form-group">
+
+                        <label>
+                            Select Patient
+                        </label>
+
+                        <select id="imagePatient">
+
+                            <option value="">
+                                Select Patient
+                            </option>
+
+                        </select>
+
+                    </div>
+
+
+                    <div class="upload-box">
+
+                        <div class="upload-icon">
+                            🖼️
+                        </div>
+
+                        <p>
+                            Supported formats:
+                            DICOM, JPG, JPEG and PNG
+                        </p>
+
+                        <input
+                            type="file"
+                            id="medicalImage"
+                            class="file-input"
+                            accept=".dcm,.jpg,.jpeg,.png"
+                        >
+
+                    </div>
+
+
+                    <button
+                        class="btn btn-primary"
+                        onclick="uploadMedicalImage()"
+                    >
+                        Upload Image
+                    </button>
+
+                </div>
+
+
+                <!-- VALIDATION -->
+
+                <div
+                    class="section-card"
+                    id="validationSection"
+                    style="display: none;"
+                >
+
+                    <h2>
+                        Image Validation
+                    </h2>
+
+
+                    <div id="validationResult">
+                    </div>
+
+
+                    <br>
+
+
+                    <button
+                        class="btn btn-success"
+                        id="cnnButton"
+                        onclick="runCNNAnalysis()"
+                        style="display: none;"
+                    >
+                        🤖 Run CNN Analysis
+                    </button>
+
+                </div>
+
+
+                <!-- CNN RESULT -->
+
+                <div
+                    class="section-card"
+                    id="cnnResultSection"
+                    style="display: none;"
+                >
+
+                    <h2>
+                        CNN Analysis Result
+                    </h2>
+
+
+                    <div id="cnnResult">
+                    </div>
+
+                </div>
+
+            </section>
+
+
+            <!-- =============================================
+                 AI ANALYSIS
+            ============================================== -->
+
+            <section
+                id="analysisPage"
+                class="page"
+            >
+
+                <div class="page-title">
+
+                    <h1>
+                        AI Analysis
+                    </h1>
+
+                    <p>
+                        AI-based abnormality detection
+                    </p>
+
+                </div>
+
+
+                <div class="section-card">
+
+                    <h2>
+                        AI Analysis
+                    </h2>
+
+                    <p>
+                        Upload a medical image from the
+                        Medical Images section to perform
+                        CNN-based analysis.
+                    </p>
+
+                </div>
+
+            </section>
+
+
+            <!-- =============================================
+                 REPORTS
+            ============================================== -->
+
+            <section
+                id="reportsPage"
+                class="page"
+            >
+
+                <div class="page-title">
+
+                    <h1>
+                        Reports
+                    </h1>
+
+                    <p>
+                        Medical imaging analysis reports
+                    </p>
+
+                </div>
+
+
+                <div class="section-card">
+
+                    <h2>
+                        Reports
+                    </h2>
+
+                    <p>
+                        Report generation will be implemented
+                        in the next phase.
+                    </p>
+
+                </div>
+
+            </section>
+
+
+            <!-- =============================================
+                 USER MANAGEMENT
+            ============================================== -->
+
+            <section
+                id="usersPage"
+                class="page"
+            >
+
+                <div class="page-title">
+
+                    <h1>
+                        User Management
+                    </h1>
+
+                    <p>
+                        Administrator user management
+                    </p>
+
+                </div>
+
+
+                <div class="section-card">
+
+                    <h2>
+                        User Management
+                    </h2>
+
+                    <p>
+                        User management functionality will
+                        be connected to the backend
+                        authentication system in the next phase.
+                    </p>
+
+                </div>
+
+            </section>
+
+
+        </main>
+
+    </div>
+
+
+    <!-- =====================================================
+         JAVASCRIPT
+    ====================================================== -->
+
+    <script>
+
+
+        /* =====================================================
+           FASTAPI SERVER
+        ===================================================== */
+
+        const API_URL =
+            "http://127.0.0.1:8000";
+
+
+        /* =====================================================
+           GLOBAL VARIABLES
+        ===================================================== */
+
+        let patients =
+            JSON.parse(
+                localStorage.getItem("patients")
+            ) || [];
+
+
+        let editIndex = -1;
+
+
+        let currentFileId = null;
+
+
+        /* =====================================================
+           LOGIN
+        ===================================================== */
+
+        function login(event) {
+
+            event.preventDefault();
+
+
+            const username =
+                document
+                    .getElementById("username")
+                    .value
+                    .trim();
+
+
+            const password =
+                document
+                    .getElementById("password")
+                    .value
+                    .trim();
+
+
+            const role =
+                document
+                    .getElementById("role")
+                    .value;
+
+
+            if (
+                username === "" ||
+                password === "" ||
+                role === ""
+            ) {
+
+                alert(
+                    "Please fill in all login fields."
+                );
+
+                return;
+            }
+
+
+            /*
+             * FRONTEND PROTOTYPE
+             *
+             * Any non-empty username/password
+             * is accepted for now.
+             *
+             * Real authentication should be
+             * moved to the FastAPI backend.
+             */
+
+
+            localStorage.setItem(
+                "loggedIn",
+                "true"
+            );
+
+
+            localStorage.setItem(
+                "username",
+                username
+            );
+
+
+            localStorage.setItem(
+                "role",
+                role
+            );
+
+
+            startApplication();
+        }
+
+
+        /* =====================================================
+           START APPLICATION
+        ===================================================== */
+
+        function startApplication() {
+
+            const loggedIn =
+                localStorage.getItem(
+                    "loggedIn"
+                );
+
+
+            if (
+                loggedIn !== "true"
+            ) {
+
+                document
+                    .getElementById("loginPage")
+                    .style.display = "flex";
+
+
+                document
+                    .getElementById("app")
+                    .style.display = "none";
+
+
+                return;
+            }
+
+
+            const username =
+                localStorage.getItem(
+                    "username"
+                );
+
+
+            const role =
+                localStorage.getItem(
+                    "role"
+                );
+
+
+            document
+                .getElementById("loginPage")
+                .style.display = "none";
+
+
+            document
+                .getElementById("app")
+                .style.display = "block";
+
+
+            document
+                .getElementById("loggedUsername")
+                .textContent =
+                username;
+
+
+            document
+                .getElementById("loggedRole")
+                .textContent =
+                role;
+
+
+            document
+                .getElementById("welcomeUsername")
+                .textContent =
+                username;
+
+
+            document
+                .getElementById("welcomeRole")
+                .textContent =
+                role;
+
+
+            document
+                .getElementById("currentRole")
+                .textContent =
+                role;
+
+
+            applyRoleAccess();
+
+            displayPatients();
+
+            updateDashboard();
+
+        }
+
+
+        /* =====================================================
+           ROLE ACCESS
+        ===================================================== */
+
+        function applyRoleAccess() {
+
+            const role =
+                localStorage.getItem(
+                    "role"
+                );
+
+
+            const userManagement =
+                document.getElementById(
+                    "userManagementNav"
+                );
+
+
+            if (
+                role === "Admin"
+            ) {
+
+                userManagement.style.display =
+                    "block";
+
+            } else {
+
+                userManagement.style.display =
+                    "none";
+
+            }
+
+        }
+
+
+        /* =====================================================
+           PAGE NAVIGATION
+        ===================================================== */
+
+        function showPage(
+            pageId,
+            clickedButton
+        ) {
+
+            const pages =
+                document.querySelectorAll(
+                    ".page"
+                );
+
+
+            pages.forEach(
+                function(page) {
+
+                    page.classList.remove(
+                        "active"
+                    );
+
+                }
+            );
+
+
+            const selectedPage =
+                document.getElementById(
+                    pageId
+                );
+
+
+            if (selectedPage) {
+
+                selectedPage.classList.add(
+                    "active"
+                );
+
+            }
+
+
+            const navItems =
+                document.querySelectorAll(
+                    ".nav-item"
+                );
+
+
+            navItems.forEach(
+                function(item) {
+
+                    item.classList.remove(
+                        "active"
+                    );
+
+                }
+            );
+
+
+            if (clickedButton) {
+
+                clickedButton.classList.add(
+                    "active"
+                );
+
+            }
+
+
+            if (
+                pageId === "imagesPage"
+            ) {
+
+                loadImagePatients();
+
+            }
+
+
+            if (
+                pageId === "dashboardPage"
+            ) {
+
+                updateDashboard();
+
+            }
+
+        }
+
+
+        /* =====================================================
+           SAVE / UPDATE PATIENT
+        ===================================================== */
+
+        function savePatient(event) {
+
+            event.preventDefault();
+
+
+            const id =
+                document
+                    .getElementById("patientId")
+                    .value
+                    .trim();
+
+
+            const name =
+                document
+                    .getElementById("patientName")
+                    .value
+                    .trim();
+
+
+            const age =
+                document
+                    .getElementById("patientAge")
+                    .value;
+
+
+            const gender =
+                document
+                    .getElementById("patientGender")
+                    .value;
+
+
+            const studyType =
+                document
+                    .getElementById("studyType")
+                    .value;
+
+
+            const studyDate =
+                document
+                    .getElementById("studyDate")
+                    .value;
+
+
+            const patient = {
+
+                id: id,
+
+                name: name,
+
+                age: age,
+
+                gender: gender,
+
+                studyType: studyType,
+
+                studyDate: studyDate,
+
+                status: "Active"
+
+            };
+
+
+            if (
+                editIndex === -1
+            ) {
+
+                patients.push(
+                    patient
+                );
+
+                alert(
+                    "Patient added successfully."
+                );
+
+            } else {
+
+                patients[
+                    editIndex
+                ] = patient;
+
+                editIndex = -1;
+
+
+                document
+                    .getElementById(
+                        "savePatientButton"
+                    )
+                    .textContent =
+                    "Save Patient";
+
+
+                alert(
+                    "Patient updated successfully."
+                );
+
+            }
+
+
+            localStorage.setItem(
+                "patients",
+                JSON.stringify(
+                    patients
+                )
+            );
+
+
+            clearPatientForm();
+
+            displayPatients();
+
+            updateDashboard();
+
+        }
+
+
+        /* =====================================================
+           DISPLAY PATIENTS
+        ===================================================== */
+
+        function displayPatients(
+            filteredPatients = patients
+        ) {
+
+            const tableBody =
+                document.getElementById(
+                    "patientTableBody"
+                );
+
+
+            tableBody.innerHTML = "";
+
+
+            if (
+                filteredPatients.length === 0
+            ) {
+
+                tableBody.innerHTML = `
+
+                    <tr>
+
+                        <td
+                            colspan="8"
+                            style="
+                                text-align:center;
+                                padding:30px;
+                            "
+                        >
+                            No patient records found.
+                        </td>
+
+                    </tr>
+
+                `;
+
+                return;
+            }
+
+
+            filteredPatients.forEach(
+                function(patient) {
+
+                    const originalIndex =
+                        patients.indexOf(
+                            patient
+                        );
+
+
+                    let deleteButton = "";
+
+
+                    if (
+                        localStorage.getItem(
+                            "role"
+                        ) === "Admin"
+                    ) {
+
+                        deleteButton = `
+
+                            <button
+                                class="btn
+                                       btn-danger
+                                       btn-small"
+                                onclick="deletePatient(
+                                    ${originalIndex}
+                                )"
+                            >
+                                Delete
+                            </button>
+
+                        `;
+
+                    }
+
+
+                    const row = `
+
+                        <tr>
+
+                            <td>
+                                ${patient.id}
+                            </td>
+
+                            <td>
+                                ${patient.name}
+                            </td>
+
+                            <td>
+                                ${patient.age}
+                            </td>
+
+                            <td>
+                                ${patient.gender}
+                            </td>
+
+                            <td>
+                                ${patient.studyType}
+                            </td>
+
+                            <td>
+                                ${patient.studyDate}
+                            </td>
+
+                            <td>
+
+                                <span class="status">
+                                    ${patient.status}
+                                </span>
+
+                            </td>
+
+                            <td>
+
+                                <button
+                                    class="
+                                        btn
+                                        btn-secondary
+                                        btn-small
+                                    "
+                                    onclick="viewPatient(
+                                        ${originalIndex}
+                                    )"
+                                >
+                                    View
+                                </button>
+
+
+                                <button
+                                    class="
+                                        btn
+                                        btn-primary
+                                        btn-small
+                                    "
+                                    onclick="editPatient(
+                                        ${originalIndex}
+                                    )"
+                                >
+                                    Edit
+                                </button>
+
+                                ${deleteButton}
+
+                            </td>
+
+                        </tr>
+
+                    `;
+
+
+                    tableBody.innerHTML += row;
+
+                }
+            );
+
+        }
+
+
+        /* =====================================================
+           VIEW PATIENT
+        ===================================================== */
+
+        function viewPatient(index) {
+
+            const patient =
+                patients[index];
+
+
+            alert(
+
+                "Patient Information\n\n" +
+
+                "Patient ID: " +
+                patient.id +
+
+                "\nName: " +
+                patient.name +
+
+                "\nAge: " +
+                patient.age +
+
+                "\nGender: " +
+                patient.gender +
+
+                "\nStudy Type: " +
+                patient.studyType +
+
+                "\nStudy Date: " +
+                patient.studyDate
+
+            );
+
+        }
+
+
+        /* =====================================================
+           EDIT PATIENT
+        ===================================================== */
+
+        function editPatient(index) {
+
+            const patient =
+                patients[index];
+
+
+            document
+                .getElementById("patientId")
+                .value =
+                patient.id;
+
+
+            document
+                .getElementById("patientName")
+                .value =
+                patient.name;
+
+
+            document
+                .getElementById("patientAge")
+                .value =
+                patient.age;
+
+
+            document
+                .getElementById("patientGender")
+                .value =
+                patient.gender;
+
+
+            document
+                .getElementById("studyType")
+                .value =
+                patient.studyType;
+
+
+            document
+                .getElementById("studyDate")
+                .value =
+                patient.studyDate;
+
+
+            editIndex = index;
+
+
+            document
+                .getElementById(
+                    "savePatientButton"
+                )
+                .textContent =
+                "Update Patient";
+
+
+            showPage(
+                "patientPage",
+                null
+            );
+
+        }
+
+
+        /* =====================================================
+           DELETE PATIENT
+        ===================================================== */
+
+        function deletePatient(index) {
+
+            const role =
+                localStorage.getItem(
+                    "role"
+                );
+
+
+            if (
+                role !== "Admin"
+            ) {
+
+                alert(
+                    "Only Administrator can delete patients."
+                );
+
+                return;
+            }
+
+
+            const confirmed =
+                confirm(
+                    "Are you sure you want to delete this patient?"
+                );
+
+
+            if (!confirmed) {
+
+                return;
+            }
+
+
+            patients.splice(
+                index,
+                1
+            );
+
+
+            localStorage.setItem(
+                "patients",
+                JSON.stringify(
+                    patients
+                )
+            );
+
+
+            displayPatients();
+
+            updateDashboard();
+
+            loadImagePatients();
+
+        }
+
+
+        /* =====================================================
+           SEARCH PATIENTS
+        ===================================================== */
+
+        function searchPatients() {
+
+            const search =
+                document
+                    .getElementById(
+                        "patientSearch"
+                    )
+                    .value
+                    .toLowerCase()
+                    .trim();
+
+
+            const filtered =
+                patients.filter(
+                    function(patient) {
+
+                        return (
+
+                            patient.id
+                                .toLowerCase()
+                                .includes(search)
+
+                            ||
+
+                            patient.name
+                                .toLowerCase()
+                                .includes(search)
+
+                            ||
+
+                            patient.studyType
+                                .toLowerCase()
+                                .includes(search)
+
+                        );
+
+                    }
+                );
+
+
+            displayPatients(
+                filtered
+            );
+
+        }
+
+
+        /* =====================================================
+           CLEAR PATIENT FORM
+        ===================================================== */
+
+        function clearPatientForm() {
+
+            document
+                .getElementById("patientId")
+                .value = "";
+
+
+            document
+                .getElementById("patientName")
+                .value = "";
+
+
+            document
+                .getElementById("patientAge")
+                .value = "";
+
+
+            document
+                .getElementById("patientGender")
+                .value = "";
+
+
+            document
+                .getElementById("studyType")
+                .value = "";
+
+
+            document
+                .getElementById("studyDate")
+                .value = "";
+
+
+            editIndex = -1;
+
+
+            document
+                .getElementById(
+                    "savePatientButton"
+                )
+                .textContent =
+                "Save Patient";
+
+        }
+
+
+        /* =====================================================
+           UPDATE DASHBOARD
+        ===================================================== */
+
+        function updateDashboard() {
+
+            document
+                .getElementById(
+                    "totalPatients"
+                )
+                .textContent =
+                patients.length;
+
+
+            document
+                .getElementById(
+                    "totalStudies"
+                )
+                .textContent =
+                patients.length;
+
+        }
+
+
+        /* =====================================================
+           LOAD PATIENTS FOR IMAGE UPLOAD
+        ===================================================== */
+
+        function loadImagePatients() {
+
+            const patientSelect =
+                document.getElementById(
+                    "imagePatient"
+                );
+
+
+            if (!patientSelect) {
+
+                return;
+
+            }
+
+
+            patientSelect.innerHTML = `
+
+                <option value="">
+                    Select Patient
+                </option>
+
+            `;
+
+
+            patients.forEach(
+                function(patient) {
+
+                    const option =
+                        document.createElement(
+                            "option"
+                        );
+
+
+                    option.value =
+                        patient.id;
+
+
+                    option.textContent =
+                        patient.id +
+                        " - " +
+                        patient.name;
+
+
+                    patientSelect.appendChild(
+                        option
+                    );
+
+                }
+            );
+
+        }
+
+
+        /* =====================================================
+           UPLOAD MEDICAL IMAGE
+           FR-03
+        ===================================================== */
+
+        async function uploadMedicalImage() {
+
+            const patientSelect =
+                document.getElementById(
+                    "imagePatient"
+                );
+
+
+            const fileInput =
+                document.getElementById(
+                    "medicalImage"
+                );
+
+
+            if (
+                !patientSelect.value
+            ) {
+
+                alert(
+                    "Please select a patient."
+                );
+
+                return;
+
+            }
+
+
+            if (
+                !fileInput.files.length
+            ) {
+
+                alert(
+                    "Please select a medical image."
+                );
+
+                return;
+
+            }
+
+
+            const file =
+                fileInput.files[0];
+
+
+            const allowedExtensions = [
+
+                ".dcm",
+
+                ".jpg",
+
+                ".jpeg",
+
+                ".png"
+
+            ];
+
+
+            const filename =
+                file.name.toLowerCase();
+
+
+            const validExtension =
+                allowedExtensions.some(
+                    function(extension) {
+
+                        return filename.endsWith(
+                            extension
+                        );
+
+                    }
+                );
+
+
+            if (
+                !validExtension
+            ) {
+
+                alert(
+                    "Unsupported file format. Please select DICOM, JPG, JPEG or PNG."
+                );
+
+                return;
+
+            }
+
+
+            const formData =
+                new FormData();
+
+
+            formData.append(
+                "file",
+                file
+            );
+
+
+            try {
+
+                const response =
+                    await fetch(
+                        API_URL +
+                        "/api/studies/upload",
+                        {
+
+                            method: "POST",
+
+                            body: formData
+
+                        }
+                    );
+
+
+                const result =
+                    await response.json();
+
+
+                if (
+                    !response.ok
+                ) {
+
+                    throw new Error(
+                        result.detail ||
+                        "Upload failed."
+                    );
+
+                }
+
+
+                currentFileId =
+                    result.file_id;
+
+
+                alert(
+                    "Image uploaded successfully."
+                );
+
+
+                await validateUploadedImage();
+
+
+            }
+
+            catch (error) {
+
+                alert(
+                    "Upload failed:\n" +
+                    error.message
+                );
+
+            }
+
+        }
+
+
+        /* =====================================================
+           VALIDATE IMAGE
+           FR-04
+        ===================================================== */
+
+        async function validateUploadedImage() {
+
+            if (
+                !currentFileId
+            ) {
+
+                return;
+
+            }
+
+
+            try {
+
+                const response =
+                    await fetch(
+
+                        API_URL +
+                        "/api/studies/" +
+                        currentFileId +
+                        "/validate",
+
+                        {
+
+                            method: "POST"
+
+                        }
+
+                    );
+
+
+                const result =
+                    await response.json();
+
+
+                if (
+                    !response.ok
+                ) {
+
+                    throw new Error(
+                        result.detail ||
+                        "Validation failed."
+                    );
+
+                }
+
+
+                const validationSection =
+                    document.getElementById(
+                        "validationSection"
+                    );
+
+
+                const validationResult =
+                    document.getElementById(
+                        "validationResult"
+                    );
+
+
+                validationSection.style.display =
+                    "block";
+
+
+                if (
+                    !result.valid
+                ) {
+
+                    validationResult.innerHTML = `
+
+                        <p
+                            style="
+                                color:#dc2626;
+                                font-weight:600;
+                            "
+                        >
+                            ❌ Image validation failed
+                        </p>
+
+                        <br>
+
+                        <p>
+                            ${result.message || ""}
+                        </p>
+
+                    `;
+
+
+                    document
+                        .getElementById(
+                            "cnnButton"
+                        )
+                        .style.display =
+                        "none";
+
+
+                    return;
+
+                }
+
+
+                let html = `
+
+                    <div class="result-row">
+
+                        <span class="result-label">
+                            Validation Status
+                        </span>
+
+                        <span class="result-value">
+
+                            <span class="status">
+                                Valid
+                            </span>
+
+                        </span>
+
+                    </div>
+
+
+                    <div class="result-row">
+
+                        <span class="result-label">
+                            File Type
+                        </span>
+
+                        <span class="result-value">
+                            ${result.type || "Unknown"}
+                        </span>
+
+                    </div>
+
+                `;
+
+
+                if (
+                    result.type === "DICOM"
+                ) {
+
+                    html += `
+
+                        <div class="result-row">
+
+                            <span class="result-label">
+                                Modality
+                            </span>
+
+                            <span class="result-value">
+                                ${result.modality || "Not available"}
+                            </span>
+
+                        </div>
+
+
+                        <div class="result-row">
+
+                            <span class="result-label">
+                                Dimensions
+                            </span>
+
+                            <span class="result-value">
+                                ${result.rows}
+                                ×
+                                ${result.columns}
+                            </span>
+
+                        </div>
+
+
+                        <div class="result-row">
+
+                            <span class="result-label">
+                                Pixel Data
+                            </span>
+
+                            <span class="result-value">
+                                ${
+                                    result.has_pixel_data
+                                    ? "Available"
+                                    : "Not Available"
+                                }
+                            </span>
+
+                        </div>
+
+
+                        <div class="result-row">
+
+                            <span class="result-label">
+                                SOP Class UID
+                            </span>
+
+                            <span class="result-value">
+                                ${
+                                    result.sop_class_uid ||
+                                    "Not available"
+                                }
+                            </span>
+
+                        </div>
+
+                    `;
+
+                }
+
+                else {
+
+                    html += `
+
+                        <div class="result-row">
+
+                            <span class="result-label">
+                                Dimensions
+                            </span>
+
+                            <span class="result-value">
+                                ${result.width}
+                                ×
+                                ${result.height}
+                            </span>
+
+                        </div>
+
+
+                        <div class="result-row">
+
+                            <span class="result-label">
+                                Format
+                            </span>
+
+                            <span class="result-value">
+                                ${result.format}
+                            </span>
+
+                        </div>
+
+
+                        <div class="result-row">
+
+                            <span class="result-label">
+                                Color Mode
+                            </span>
+
+                            <span class="result-value">
+                                ${result.mode}
+                            </span>
+
+                        </div>
+
+                    `;
+
+                }
+
+
+                html += `
+
+                    <div class="result-row">
+
+                        <span class="result-label">
+                            Model Compatible
+                        </span>
+
+                        <span class="result-value">
+
+                            ${
+                                result.model_compatible
+                                ? "Yes"
+                                : "No"
+                            }
+
+                        </span>
+
+                    </div>
+
+                `;
+
+
+                validationResult.innerHTML =
+                    html;
+
+
+                if (
+                    result.model_compatible
+                ) {
+
+                    document
+                        .getElementById(
+                            "cnnButton"
+                        )
+                        .style.display =
+                        "inline-block";
+
+                }
+
+            }
+
+            catch (error) {
+
+                alert(
+                    "Validation error:\n" +
+                    error.message
+                );
+
+            }
+
+        }
+
+
+        /* =====================================================
+           CNN ANALYSIS
+        ===================================================== */
+
+        async function runCNNAnalysis() {
+
+            if (
+                !currentFileId
+            ) {
+
+                alert(
+                    "Please upload and validate an image first."
+                );
+
+                return;
+
+            }
+
+
+            const resultSection =
+                document.getElementById(
+                    "cnnResultSection"
+                );
+
+
+            const resultBox =
+                document.getElementById(
+                    "cnnResult"
+                );
+
+
+            resultSection.style.display =
+                "block";
+
+
+            resultBox.innerHTML = `
+
+                <p>
+                    🤖 Running CNN analysis...
+                </p>
+
+            `;
+
+
+            try {
+
+                const response =
+                    await fetch(
+
+                        API_URL +
+                        "/api/studies/" +
+                        currentFileId +
+                        "/analyze",
+
+                        {
+
+                            method: "POST"
+
+                        }
+
+                    );
+
+
+                const result =
+                    await response.json();
+
+
+                if (
+                    !response.ok
+                ) {
+
+                    throw new Error(
+                        result.detail ||
+                        "CNN analysis failed."
+                    );
+
+                }
+
+
+                resultBox.innerHTML = `
+
+                    <div class="result-row">
+
+                        <span class="result-label">
+                            Analysis Status
+                        </span>
+
+                        <span class="result-value">
+
+                            <span class="status">
+                                Completed
+                            </span>
+
+                        </span>
+
+                    </div>
+
+
+                    <div class="result-row">
+
+                        <span class="result-label">
+                            Predicted Class
+                        </span>
+
+                        <span class="result-value">
+                            ${result.predicted_class}
+                        </span>
+
+                    </div>
+
+
+                    <div class="result-row">
+
+                        <span class="result-label">
+                            Confidence
+                        </span>
+
+                        <span class="result-value">
+
+                            ${
+                                (
+                                    result.confidence *
+                                    100
+                                ).toFixed(2)
+                            }%
+
+                        </span>
+
+                    </div>
+
+                `;
+
+            }
+
+            catch (error) {
+
+                resultBox.innerHTML = `
+
+                    <p
+                        style="
+                            color:#dc2626;
+                            font-weight:600;
+                        "
+                    >
+                        CNN analysis unavailable.
+                    </p>
+
+                    <br>
+
+                    <p>
+                        ${error.message}
+                    </p>
+
+                `;
+
+            }
+
+        }
+
+
+        /* =====================================================
+           LOGOUT
+        ===================================================== */
+
+        function logout() {
+
+            localStorage.removeItem(
+                "loggedIn"
+            );
+
+
+            localStorage.removeItem(
+                "username"
+            );
+
+
+            localStorage.removeItem(
+                "role"
+            );
+
+
+            document
+                .getElementById("app")
+                .style.display =
+                "none";
+
+
+            document
+                .getElementById("loginPage")
+                .style.display =
+                "flex";
+
+
+            document
+                .getElementById("username")
+                .value =
+                "";
+
+
+            document
+                .getElementById("password")
+                .value =
+                "";
+
+
+            document
+                .getElementById("role")
+                .value =
+                "";
+
+        }
+
+
+        /* =====================================================
+           PAGE LOAD
+        ===================================================== */
+
+        window.onload =
+            function() {
+
+                startApplication();
+
+            };
+
+
+    </script>
+
+</body>
+
+</html>
