@@ -99,6 +99,8 @@ def create_tables():
 
             validation_status TEXT,
 
+            preprocessing_status TEXT,
+
             created_at TIMESTAMP
                 DEFAULT CURRENT_TIMESTAMP,
 

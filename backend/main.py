@@ -651,7 +651,6 @@ async def preprocess_image(file_id: str):
     )
 
     if not matching_files:
-
         raise HTTPException(
             status_code=404,
             detail="Uploaded file not found"
@@ -680,18 +679,35 @@ async def preprocess_image(file_id: str):
                 / 255.0
             )
 
-            return {
-                "file_id": file_id,
-                "preprocessed": True,
-                "size": [224, 224],
-                "channels": 3,
-                "min_pixel_value": float(
-                    normalized.min()
-                ),
-                "max_pixel_value": float(
-                    normalized.max()
-                )
-            }
+        # Update preprocessing status in SQLite
+        connection = get_connection()
+        cursor = connection.cursor()
+
+        cursor.execute(
+            """
+            UPDATE medical_images
+            SET preprocessing_status = ?
+            WHERE file_id = ?
+            """,
+            ("Preprocessed", file_id)
+        )
+
+        connection.commit()
+        connection.close()
+
+        return {
+            "file_id": file_id,
+            "preprocessed": True,
+            "preprocessing_status": "Preprocessed",
+            "size": [224, 224],
+            "channels": 3,
+            "min_pixel_value": float(
+                normalized.min()
+            ),
+            "max_pixel_value": float(
+                normalized.max()
+            )
+        }
 
     except Exception as e:
 
