@@ -184,6 +184,26 @@ def create_tables():
 
 
     # =====================================================
+    # CLINICIAN REVIEWS TABLE
+    # =====================================================
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS clinician_reviews (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            study_id INTEGER NOT NULL,
+            clinician_name TEXT,
+            review_status TEXT NOT NULL,
+            final_decision TEXT,
+            comments TEXT,
+            created_at TIMESTAMP
+                DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (study_id)
+                REFERENCES studies(id)
+        )
+    """)
+
+
+    # =====================================================
     # SAVE CHANGES
     # =====================================================
 

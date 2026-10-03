@@ -844,6 +844,203 @@ def get_triage(study_id: int):
     finally:
         connection.close()
 
+# ============================================================
+# CLINICIAN REVIEW MANAGEMENT
+# ============================================================
+
+class ClinicianReviewCreate(BaseModel):
+    clinician_name: str
+    review_status: str = "Completed"
+    final_decision: str
+    comments: str | None = None
+
+
+# ------------------------------------------------------------
+# Create Clinician Review
+# ------------------------------------------------------------
+
+@app.post("/api/analysis/{study_id}/review")
+def create_clinician_review(
+    study_id: int,
+    review: ClinicianReviewCreate
+):
+
+    allowed_decisions = [
+        "Accept",
+        "Modify",
+        "Reject"
+    ]
+
+    allowed_statuses = [
+        "Pending",
+        "Completed"
+    ]
+
+    # Validate review status
+    if review.review_status not in allowed_statuses:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "Invalid review status",
+                "allowed_statuses": allowed_statuses
+            }
+        )
+
+    # Validate final decision
+    if review.final_decision not in allowed_decisions:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "Invalid final decision",
+                "allowed_decisions": allowed_decisions
+            }
+        )
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    try:
+
+        # ----------------------------------------------------
+        # Check whether the study exists
+        # ----------------------------------------------------
+
+        cursor.execute(
+            """
+            SELECT id
+            FROM studies
+            WHERE id = ?
+            """,
+            (study_id,)
+        )
+
+        study = cursor.fetchone()
+
+        if study is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Study not found"
+            )
+
+        # ----------------------------------------------------
+        # Store clinician review
+        # ----------------------------------------------------
+
+        cursor.execute(
+            """
+            INSERT INTO clinician_reviews
+            (
+                study_id,
+                clinician_name,
+                review_status,
+                final_decision,
+                comments
+            )
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                study_id,
+                review.clinician_name,
+                review.review_status,
+                review.final_decision,
+                review.comments
+            )
+        )
+
+        review_id = cursor.lastrowid
+
+        connection.commit()
+
+        return {
+            "message": "Clinician review created successfully",
+            "review_id": review_id,
+            "study_id": study_id,
+            "clinician_name": review.clinician_name,
+            "review_status": review.review_status,
+            "final_decision": review.final_decision,
+            "comments": review.comments
+        }
+
+    except HTTPException:
+        connection.rollback()
+        raise
+
+    except Exception as e:
+        connection.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to create clinician review: {str(e)}"
+        )
+
+    finally:
+        connection.close()
+
+
+# ------------------------------------------------------------
+# Get Clinician Reviews for a Study
+# ------------------------------------------------------------
+
+@app.get("/api/analysis/{study_id}/review")
+def get_clinician_reviews(study_id: int):
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    try:
+
+        # ----------------------------------------------------
+        # Check whether the study exists
+        # ----------------------------------------------------
+
+        cursor.execute(
+            """
+            SELECT id
+            FROM studies
+            WHERE id = ?
+            """,
+            (study_id,)
+        )
+
+        study = cursor.fetchone()
+
+        if study is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Study not found"
+            )
+
+        # ----------------------------------------------------
+        # Retrieve clinician reviews
+        # ----------------------------------------------------
+
+        cursor.execute(
+            """
+            SELECT
+                id,
+                study_id,
+                clinician_name,
+                review_status,
+                final_decision,
+                comments,
+                created_at
+            FROM clinician_reviews
+            WHERE study_id = ?
+            ORDER BY id DESC
+            """,
+            (study_id,)
+        )
+
+        reviews = [dict(row) for row in cursor.fetchall()]
+
+        return {
+            "study_id": study_id,
+            "count": len(reviews),
+            "reviews": reviews
+        }
+
+    finally:
+        connection.close()
 
 # ABNORMALITY MANAGEMENT
 
