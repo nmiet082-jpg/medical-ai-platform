@@ -159,6 +159,22 @@ class StudyCreate(BaseModel):
     study_date: str
 
 
+# ==================================================
+# AI MODEL MANAGEMENT MODEL
+# ==================================================
+
+
+class AIModelCreate(BaseModel):
+
+    model_name: str
+
+    version: str
+
+    model_path: str | None = None
+
+    status: str = "Registered"
+
+
 
 
 
@@ -1433,6 +1449,151 @@ async def preprocess_image(file_id: str):
         )
 
 # ==================================================
+# AI MODEL MANAGEMENT
+# ==================================================
+
+
+@app.post("/api/models")
+def create_ai_model(model: AIModelCreate):
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    try:
+
+        cursor.execute(
+            """
+            SELECT id
+            FROM ai_models
+            WHERE model_name = ? AND version = ?
+            """,
+            (model.model_name, model.version)
+        )
+
+        existing_model = cursor.fetchone()
+
+        if existing_model is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="A model with the same name and version already exists"
+            )
+
+        cursor.execute(
+            """
+            INSERT INTO ai_models (
+                model_name,
+                version,
+                model_path,
+                status
+            )
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                model.model_name,
+                model.version,
+                model.model_path,
+                model.status
+            )
+        )
+
+        connection.commit()
+        model_id = cursor.lastrowid
+
+        return {
+            "message": "AI model registered successfully",
+            "model_id": model_id,
+            "model_name": model.model_name,
+            "version": model.version,
+            "model_path": model.model_path,
+            "status": model.status
+        }
+
+    except HTTPException:
+        connection.rollback()
+        raise
+
+    except Exception as e:
+        connection.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail=str(e)
+        )
+
+    finally:
+        connection.close()
+
+
+@app.get("/api/models")
+def get_ai_models():
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    try:
+
+        cursor.execute(
+            """
+            SELECT
+                id,
+                model_name,
+                version,
+                model_path,
+                status,
+                created_at
+            FROM ai_models
+            ORDER BY id DESC
+            """
+        )
+
+        rows = cursor.fetchall()
+
+        return {
+            "count": len(rows),
+            "models": [dict(row) for row in rows]
+        }
+
+    finally:
+        connection.close()
+
+
+@app.get("/api/models/{model_id}")
+def get_ai_model(model_id: int):
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    try:
+
+        cursor.execute(
+            """
+            SELECT
+                id,
+                model_name,
+                version,
+                model_path,
+                status,
+                created_at
+            FROM ai_models
+            WHERE id = ?
+            """,
+            (model_id,)
+        )
+
+        row = cursor.fetchone()
+
+        if row is None:
+            raise HTTPException(
+                status_code=404,
+                detail="AI model not found"
+            )
+
+        return dict(row)
+
+    finally:
+        connection.close()
+
+
+# ==================================================
 # AI ANALYSIS / PREDICTION STRUCTURE
 # ==================================================
 #
@@ -1607,4 +1768,5 @@ def get_ai_analysis(study_id: int):
 
     finally:
         connection.close()
+
 
