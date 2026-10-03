@@ -39,15 +39,10 @@ def create_tables():
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS patients (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-
             patient_id TEXT UNIQUE NOT NULL,
-
             name TEXT NOT NULL,
-
             age INTEGER,
-
             gender TEXT,
-
             created_at TIMESTAMP
                 DEFAULT CURRENT_TIMESTAMP
         )
@@ -61,16 +56,11 @@ def create_tables():
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS studies (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-
             patient_id INTEGER NOT NULL,
-
             study_type TEXT,
-
             study_date TEXT,
-
             created_at TIMESTAMP
                 DEFAULT CURRENT_TIMESTAMP,
-
             FOREIGN KEY (patient_id)
                 REFERENCES patients(id)
         )
@@ -84,28 +74,57 @@ def create_tables():
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS medical_images (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-
             study_id INTEGER,
-
             file_id TEXT UNIQUE NOT NULL,
-
             original_filename TEXT,
-
             stored_filename TEXT,
-
             file_path TEXT,
-
             file_type TEXT,
-
             validation_status TEXT,
-
             preprocessing_status TEXT,
-
             created_at TIMESTAMP
                 DEFAULT CURRENT_TIMESTAMP,
-
             FOREIGN KEY (study_id)
                 REFERENCES studies(id)
+        )
+    """)
+
+
+    # =====================================================
+    # AI MODELS TABLE
+    # =====================================================
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS ai_models (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            model_name TEXT NOT NULL,
+            version TEXT NOT NULL,
+            model_path TEXT,
+            status TEXT,
+            created_at TIMESTAMP
+                DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+
+    # =====================================================
+    # AI PREDICTIONS TABLE
+    # =====================================================
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS ai_predictions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            study_id INTEGER NOT NULL,
+            model_id INTEGER,
+            abnormality TEXT,
+            confidence_score REAL,
+            prediction_status TEXT,
+            created_at TIMESTAMP
+                DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (study_id)
+                REFERENCES studies(id),
+            FOREIGN KEY (model_id)
+                REFERENCES ai_models(id)
         )
     """)
 
