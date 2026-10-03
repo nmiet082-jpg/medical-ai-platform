@@ -175,6 +175,22 @@ class AIModelCreate(BaseModel):
     status: str = "Registered"
 
 
+# ==================================================
+# AI PREDICTION STORAGE MODEL
+# ==================================================
+
+
+class AIPredictionCreate(BaseModel):
+
+    model_id: int
+
+    abnormality: str
+
+    confidence_score: float
+
+    prediction_status: str = "Completed"
+
+
 
 
 
@@ -1765,6 +1781,120 @@ def get_ai_analysis(study_id: int):
             "count": len(rows),
             "predictions": [dict(row) for row in rows]
         }
+
+    finally:
+        connection.close()
+
+# ==================================================
+# AI PREDICTION RECORD MANAGEMENT
+# ==================================================
+#
+# IMPORTANT:
+# This endpoint stores a prediction produced by the real AI model.
+# It must NOT be used to invent or manually create medical predictions.
+# The real model integration will call this logic in a later step.
+# ==================================================
+
+
+@app.post("/api/analysis/{study_id}/predictions")
+def store_ai_prediction(
+    study_id: int,
+    prediction: AIPredictionCreate
+):
+
+    if prediction.confidence_score < 0 or prediction.confidence_score > 1:
+        raise HTTPException(
+            status_code=400,
+            detail="confidence_score must be between 0 and 1"
+        )
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    try:
+
+        # Check that the study exists
+        cursor.execute(
+            """
+            SELECT id
+            FROM studies
+            WHERE id = ?
+            """,
+            (study_id,)
+        )
+
+        study = cursor.fetchone()
+
+        if study is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Study not found"
+            )
+
+        # Check that the referenced model exists
+        cursor.execute(
+            """
+            SELECT id, model_name, version
+            FROM ai_models
+            WHERE id = ?
+            """,
+            (prediction.model_id,)
+        )
+
+        model = cursor.fetchone()
+
+        if model is None:
+            raise HTTPException(
+                status_code=404,
+                detail="AI model not found"
+            )
+
+        # Store the prediction produced by the model
+        cursor.execute(
+            """
+            INSERT INTO ai_predictions (
+                study_id,
+                model_id,
+                abnormality,
+                confidence_score,
+                prediction_status
+            )
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                study_id,
+                prediction.model_id,
+                prediction.abnormality,
+                prediction.confidence_score,
+                prediction.prediction_status
+            )
+        )
+
+        connection.commit()
+        prediction_id = cursor.lastrowid
+
+        return {
+            "message": "AI prediction stored successfully",
+            "prediction_id": prediction_id,
+            "study_id": study_id,
+            "model_id": prediction.model_id,
+            "model_name": model["model_name"],
+            "model_version": model["version"],
+            "abnormality": prediction.abnormality,
+            "confidence_score": prediction.confidence_score,
+            "prediction_status": prediction.prediction_status
+        }
+
+    except HTTPException:
+        connection.rollback()
+        raise
+
+    except Exception as e:
+        connection.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail=str(e)
+        )
 
     finally:
         connection.close()
