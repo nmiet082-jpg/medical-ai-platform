@@ -108,6 +108,22 @@ def create_tables():
 
 
     # =====================================================
+    # ABNORMALITIES TABLE
+    # =====================================================
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS abnormalities (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL,
+            description TEXT,
+            status TEXT DEFAULT 'Active',
+            created_at TIMESTAMP
+                DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+
+    # =====================================================
     # AI PREDICTIONS TABLE
     # =====================================================
 
@@ -129,7 +145,10 @@ def create_tables():
     """)
 
 
-    # Save changes
+    # =====================================================
+    # SAVE CHANGES
+    # =====================================================
+
     connection.commit()
 
     # Close database connection

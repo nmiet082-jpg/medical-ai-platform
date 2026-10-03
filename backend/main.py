@@ -191,7 +191,135 @@ class AIPredictionCreate(BaseModel):
     prediction_status: str = "Completed"
 
 
+# ==================================================
+# ABNORMALITY MANAGEMENT
+# ==================================================
 
+
+# --------------------------------------------------
+# Abnormality Request Model
+# --------------------------------------------------
+
+class AbnormalityCreate(BaseModel):
+
+    name: str
+    description: str | None = None
+    status: str = "Active"
+
+
+# --------------------------------------------------
+# Create Abnormality
+# --------------------------------------------------
+
+@app.post("/api/abnormalities")
+def create_abnormality(abnormality: AbnormalityCreate):
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    try:
+
+        cursor.execute(
+            """
+            INSERT INTO abnormalities (
+                name,
+                description,
+                status
+            )
+            VALUES (?, ?, ?)
+            """,
+            (
+                abnormality.name,
+                abnormality.description,
+                abnormality.status
+            )
+        )
+
+        connection.commit()
+
+        abnormality_id = cursor.lastrowid
+
+        return {
+            "message": "Abnormality created successfully",
+            "abnormality_id": abnormality_id,
+            "name": abnormality.name,
+            "description": abnormality.description,
+            "status": abnormality.status
+        }
+
+    except Exception as e:
+
+        connection.rollback()
+
+        raise HTTPException(
+            status_code=400,
+            detail=str(e)
+        )
+
+    finally:
+
+        connection.close()
+
+
+# --------------------------------------------------
+# Get All Abnormalities
+# --------------------------------------------------
+
+@app.get("/api/abnormalities")
+def get_abnormalities():
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    cursor.execute(
+        """
+        SELECT *
+        FROM abnormalities
+        ORDER BY id ASC
+        """
+    )
+
+    rows = cursor.fetchall()
+
+    connection.close()
+
+    return {
+        "count": len(rows),
+        "abnormalities": [dict(row) for row in rows]
+    }
+
+
+# --------------------------------------------------
+# Get One Abnormality
+# --------------------------------------------------
+
+@app.get("/api/abnormalities/{abnormality_id}")
+def get_abnormality(abnormality_id: int):
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    cursor.execute(
+        """
+        SELECT *
+        FROM abnormalities
+        WHERE id = ?
+        """,
+        (abnormality_id,)
+    )
+
+    row = cursor.fetchone()
+
+    connection.close()
+
+    if row is None:
+
+        raise HTTPException(
+            status_code=404,
+            detail="Abnormality not found"
+        )
+
+    return dict(row)
 
 
 # ==================================================
