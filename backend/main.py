@@ -190,7 +190,151 @@ class AIPredictionCreate(BaseModel):
 
     prediction_status: str = "Completed"
 
+# ============================================================
+# XAI / EXPLANATION MANAGEMENT
+# ============================================================
 
+class ExplanationCreate(BaseModel):
+    prediction_id: int
+    explanation_type: str
+    model_version: str
+    explanation_path: str | None = None
+    metadata: str | None = None
+
+
+@app.post("/api/analysis/{study_id}/explanation")
+def create_explanation(
+    study_id: int,
+    explanation: ExplanationCreate
+):
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    # Check that the study exists
+    cursor.execute(
+        "SELECT id FROM studies WHERE id = ?",
+        (study_id,)
+    )
+    study = cursor.fetchone()
+
+    if not study:
+        conn.close()
+        raise HTTPException(
+            status_code=404,
+            detail="Study not found"
+        )
+
+    # Check that the prediction exists
+    cursor.execute(
+        """
+        SELECT id, study_id
+        FROM ai_predictions
+        WHERE id = ?
+        """,
+        (explanation.prediction_id,)
+    )
+    prediction = cursor.fetchone()
+
+    if not prediction:
+        conn.close()
+        raise HTTPException(
+            status_code=404,
+            detail="Prediction not found"
+        )
+
+    # Make sure the prediction belongs to this study
+    if prediction["study_id"] != study_id:
+        conn.close()
+        raise HTTPException(
+            status_code=400,
+            detail="Prediction does not belong to this study"
+        )
+
+    cursor.execute(
+        """
+        INSERT INTO explanations
+        (
+            prediction_id,
+            explanation_type,
+            model_version,
+            explanation_path,
+            metadata
+        )
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (
+            explanation.prediction_id,
+            explanation.explanation_type,
+            explanation.model_version,
+            explanation.explanation_path,
+            explanation.metadata
+        )
+    )
+
+    explanation_id = cursor.lastrowid
+
+    conn.commit()
+    conn.close()
+
+    return {
+        "message": "Explanation created successfully",
+        "explanation_id": explanation_id,
+        "study_id": study_id,
+        "prediction_id": explanation.prediction_id,
+        "explanation_type": explanation.explanation_type,
+        "model_version": explanation.model_version
+    }
+
+
+@app.get("/api/analysis/{study_id}/explanation")
+def get_explanations(study_id: int):
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    # Check that study exists
+    cursor.execute(
+        "SELECT id FROM studies WHERE id = ?",
+        (study_id,)
+    )
+    study = cursor.fetchone()
+
+    if not study:
+        conn.close()
+        raise HTTPException(
+            status_code=404,
+            detail="Study not found"
+        )
+
+    cursor.execute(
+        """
+        SELECT
+            id,
+            prediction_id,
+            explanation_type,
+            model_version,
+            explanation_path,
+            metadata,
+            created_at
+        FROM explanations
+        WHERE prediction_id IN (
+            SELECT id
+            FROM ai_predictions
+            WHERE study_id = ?
+        )
+        ORDER BY id DESC
+        """,
+        (study_id,)
+    )
+
+    explanations = [dict(row) for row in cursor.fetchall()]
+
+    conn.close()
+
+    return {
+        "study_id": study_id,
+        "count": len(explanations),
+        "explanations": explanations
+    }
 # ==================================================
 # ABNORMALITY MANAGEMENT
 # ==================================================

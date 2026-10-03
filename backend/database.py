@@ -146,6 +146,26 @@ def create_tables():
 
 
     # =====================================================
+    # EXPLANATIONS TABLE
+    # =====================================================
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS explanations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            prediction_id INTEGER NOT NULL,
+            explanation_type TEXT,
+            model_version TEXT,
+            explanation_path TEXT,
+            metadata TEXT,
+            created_at TIMESTAMP
+                DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (prediction_id)
+                REFERENCES ai_predictions(id)
+        )
+    """)
+
+
+    # =====================================================
     # SAVE CHANGES
     # =====================================================
 
