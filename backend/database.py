@@ -166,6 +166,24 @@ def create_tables():
 
 
     # =====================================================
+    # TRIAGE RESULTS TABLE
+    # =====================================================
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS triage_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            study_id INTEGER NOT NULL,
+            priority TEXT NOT NULL,
+            reason TEXT,
+            created_at TIMESTAMP
+                DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (study_id)
+                REFERENCES studies(id)
+        )
+    """)
+
+
+    # =====================================================
     # SAVE CHANGES
     # =====================================================
 
