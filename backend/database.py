@@ -204,6 +204,45 @@ def create_tables():
 
 
     # =====================================================
+    # REPORTS TABLE
+    # =====================================================
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS reports (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            study_id INTEGER NOT NULL,
+            report_status TEXT NOT NULL,
+            report_text TEXT,
+            generated_by TEXT,
+            created_at TIMESTAMP
+                DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP
+                DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (study_id)
+                REFERENCES studies(id)
+        )
+    """)
+
+
+    # =====================================================
+    # AUDIT LOGS TABLE
+    # =====================================================
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS audit_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            action TEXT NOT NULL,
+            entity_type TEXT,
+            entity_id TEXT,
+            performed_by TEXT,
+            details TEXT,
+            created_at TIMESTAMP
+                DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+
+    # =====================================================
     # SAVE CHANGES
     # =====================================================
 
