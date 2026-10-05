@@ -1958,7 +1958,75 @@ def generate_explanation_for_study(study_id: int):
 
     finally:
         connection.close()
+# ============================================================
+# AUTOMATIC TRIAGE CALCULATION
+# ============================================================
 
+def calculate_triage(predictions):
+    """
+    Calculate workflow priority from the AI predictions.
+
+    This is a workflow-priority rule, NOT a medical diagnosis.
+    """
+
+    if not predictions:
+        return {
+            "priority": "AI Inconclusive / Manual Review",
+            "reason": "No AI predictions are available."
+        }
+
+    # Find predictions that crossed their class threshold
+    flagged_predictions = [
+        prediction
+        for prediction in predictions
+        if prediction["flagged"] is True
+    ]
+
+    # No prediction crossed its threshold
+    if not flagged_predictions:
+        highest_prediction = max(
+            predictions,
+            key=lambda item: float(item["probability"])
+        )
+
+        return {
+            "priority": "Routine Review",
+            "reason": (
+                "No AI prediction crossed its configured threshold. "
+                f"Highest model probability was for "
+                f"{highest_prediction['class_name']} "
+                f"({float(highest_prediction['probability']) * 100:.2f}%)."
+            )
+        }
+
+    # Highest probability among flagged findings
+    highest_flagged = max(
+        flagged_predictions,
+        key=lambda item: float(item["probability"])
+    )
+
+    probability = float(highest_flagged["probability"])
+    class_name = highest_flagged["class_name"]
+
+    # Triage workflow rules
+    if probability >= 0.70:
+        priority = "High Priority"
+    elif probability >= 0.40:
+        priority = "Moderate Priority"
+    else:
+        priority = "Routine Review"
+
+    reason = (
+        f"{class_name} was flagged by the AI model with "
+        f"{probability * 100:.2f}% probability. "
+        f"Triage priority is {priority} based on the configured "
+        f"AI workflow rules. Clinician review is required."
+    )
+
+    return {
+        "priority": priority,
+        "reason": reason
+    }
 # TRIAGE MANAGEMENT
 
 
@@ -11289,13 +11357,37 @@ def run_ai_analysis(study_id: int):
 
 
 
+        # --------------------------------------------------
+        # AUTOMATIC TRIAGE CALCULATION
+        # --------------------------------------------------
+
+        triage_result = calculate_triage(stored_predictions)
+
+        # Store the automatically calculated workflow priority.
+        # This is a workflow-priority result, NOT a medical diagnosis.
+        cursor.execute(
+            """
+            INSERT INTO triage_results (
+                study_id,
+                priority,
+                reason
+            )
+            VALUES (?, ?, ?)
+            """,
+            (
+                study_id,
+                triage_result["priority"],
+                triage_result["reason"]
+            )
+        )
+
+        triage_id = cursor.lastrowid
+
         connection.commit()
-
-
 
         # --------------------------------------------------
 
-        # Return the real model output
+        # Return the real model output and triage result
 
         # --------------------------------------------------
 
@@ -11323,7 +11415,13 @@ def run_ai_analysis(study_id: int):
 
             },
 
-            "predictions": stored_predictions
+            "predictions": stored_predictions,
+
+            "triage": {
+                "triage_id": triage_id,
+                "priority": triage_result["priority"],
+                "reason": triage_result["reason"]
+            }
 
         }
 
@@ -12546,6 +12644,7 @@ def store_ai_prediction(
 
 
         connection.close()
+
 
 
 

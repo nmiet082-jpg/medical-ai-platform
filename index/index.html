@@ -1624,29 +1624,11 @@
                         onclick="runCNNAnalysis()"
                         style="display: none;"
                     >
-                        🤖 Run CNN Analysis
+                        🤖 Run AI Analysis
                     </button>
 
                 </div>
 
-
-                <!-- CNN RESULT -->
-
-                <div
-                    class="section-card"
-                    id="cnnResultSection"
-                    style="display: none;"
-                >
-
-                    <h2>
-                        AI Analysis Result
-                    </h2>
-
-
-                    <div id="cnnResult">
-                    </div>
-
-                </div>
 
             </section>
 
@@ -1676,14 +1658,33 @@
                 <div class="section-card">
 
                     <h2>
-                        AI Analysis
+                        AI Analysis Workflow
                     </h2>
 
                     <p>
-                        Upload a medical image from the
-                        Medical Images section to perform
-                        CNN-based analysis.
+                        AI analysis results, triage information, and
+                        Explainable AI (Grad-CAM) are displayed here
+                        after a validated X-ray is analyzed.
                     </p>
+
+                </div>
+
+
+                <!-- AI ANALYSIS RESULT -->
+
+                <div
+                    class="section-card"
+                    id="cnnResultSection"
+                    style="display: none;"
+                >
+
+                    <h2>
+                        AI Analysis Result
+                    </h2>
+
+
+                    <div id="cnnResult">
+                    </div>
 
                 </div>
 
@@ -3549,7 +3550,8 @@
         }
 
         /* =====================================================
-           CNN ANALYSIS
+           AI ANALYSIS
+           Started from Medical Images, displayed in AI Analysis
         ===================================================== */
 
         async function runCNNAnalysis() {
@@ -3578,6 +3580,20 @@
                 return;
 
             }
+
+
+            // Move the user to the dedicated AI Analysis section.
+            // Medical Images remains responsible only for upload, validation,
+            // preprocessing, and starting the analysis.
+            const analysisNavButton =
+                document.querySelector(
+                    'button.nav-item[onclick*="analysisPage"]'
+                );
+
+            showPage(
+                "analysisPage",
+                analysisNavButton
+            );
 
 
             const resultSection =
@@ -3795,7 +3811,916 @@
                         prototype and are not a confirmed medical diagnosis.
                     </p>
 
+
+                    <!-- ==========================================
+                         AI TRIAGE
+                    =========================================== -->
+
+                    <div
+                        id="triageSection"
+                        style="
+                            margin-top:30px;
+                            padding-top:25px;
+                            border-top:2px solid #e2e8f0;
+                        "
+                    >
+
+                        <h3
+                            style="
+                                margin-bottom:15px;
+                                color:#0f172a;
+                            "
+                        >
+                            🚦 AI Triage
+                        </h3>
+
+                        <div
+                            id="triageContent"
+                            style="
+                                background:#f8fafc;
+                                border:1px solid #e2e8f0;
+                                border-radius:12px;
+                                padding:20px;
+                            "
+                        >
+                            <p style="color:#64748b;">
+                                Loading triage result...
+                            </p>
+                        </div>
+
+                    </div>
+
+
+                    <!-- ==========================================
+                         CLINICIAN REVIEW
+                    =========================================== -->
+
+                    <div
+                        id="clinicianReviewSection"
+                        style="
+                            margin-top:30px;
+                            padding-top:25px;
+                            border-top:2px solid #e2e8f0;
+                        "
+                    >
+
+                        <h3
+                            style="
+                                margin-bottom:15px;
+                                color:#0f172a;
+                            "
+                        >
+                            👨‍⚕️ Clinician Review
+                        </h3>
+
+                        <div
+                            style="
+                                background:#f8fafc;
+                                border:1px solid #e2e8f0;
+                                border-radius:12px;
+                                padding:20px;
+                            "
+                        >
+
+                            <div
+                                id="clinicianReviewMessage"
+                                style="
+                                    display:none;
+                                    margin-bottom:15px;
+                                    padding:12px;
+                                    border-radius:8px;
+                                "
+                            ></div>
+
+                            <div style="margin-bottom:15px;">
+                                <label
+                                    for="clinicianName"
+                                    style="
+                                        display:block;
+                                        font-weight:600;
+                                        margin-bottom:7px;
+                                    "
+                                >
+                                    Clinician Name
+                                </label>
+
+                                <input
+                                    id="clinicianName"
+                                    type="text"
+                                    placeholder="Enter clinician name"
+                                    style="
+                                        width:100%;
+                                        box-sizing:border-box;
+                                        padding:12px;
+                                        border:1px solid #cbd5e1;
+                                        border-radius:8px;
+                                        font-size:14px;
+                                    "
+                                >
+                            </div>
+
+                            <div style="margin-bottom:15px;">
+                                <label
+                                    for="reviewStatus"
+                                    style="
+                                        display:block;
+                                        font-weight:600;
+                                        margin-bottom:7px;
+                                    "
+                                >
+                                    Review Status
+                                </label>
+
+                                <select
+                                    id="reviewStatus"
+                                    style="
+                                        width:100%;
+                                        padding:12px;
+                                        border:1px solid #cbd5e1;
+                                        border-radius:8px;
+                                        font-size:14px;
+                                        background:white;
+                                    "
+                                >
+                                    <option value="Completed">
+                                        Completed
+                                    </option>
+                                    <option value="Pending">
+                                        Pending
+                                    </option>
+                                </select>
+                            </div>
+
+                            <div style="margin-bottom:15px;">
+                                <label
+                                    for="finalDecision"
+                                    style="
+                                        display:block;
+                                        font-weight:600;
+                                        margin-bottom:7px;
+                                    "
+                                >
+                                    Final Decision
+                                </label>
+
+                                <select
+                                    id="finalDecision"
+                                    style="
+                                        width:100%;
+                                        padding:12px;
+                                        border:1px solid #cbd5e1;
+                                        border-radius:8px;
+                                        font-size:14px;
+                                        background:white;
+                                    "
+                                >
+                                    <option value="Accept">Accept</option>
+                                    <option value="Modify">Modify</option>
+                                    <option value="Reject">Reject</option>
+                                </select>
+                            </div>
+
+                            <div style="margin-bottom:15px;">
+                                <label
+                                    for="reviewComments"
+                                    style="
+                                        display:block;
+                                        font-weight:600;
+                                        margin-bottom:7px;
+                                    "
+                                >
+                                    Comments
+                                </label>
+
+                                <textarea
+                                    id="reviewComments"
+                                    rows="4"
+                                    placeholder="Enter review comments"
+                                    style="
+                                        width:100%;
+                                        box-sizing:border-box;
+                                        padding:12px;
+                                        border:1px solid #cbd5e1;
+                                        border-radius:8px;
+                                        font-size:14px;
+                                        resize:vertical;
+                                    "
+                                ></textarea>
+                            </div>
+
+                            <button
+                                id="submitClinicianReview"
+                                type="button"
+                                style="
+                                    padding:12px 20px;
+                                    border:none;
+                                    border-radius:8px;
+                                    background:#2563eb;
+                                    color:white;
+                                    font-weight:600;
+                                    cursor:pointer;
+                                "
+                            >
+                                Submit Clinician Review
+                            </button>
+
+                            <div
+                                id="existingReviews"
+                                style="margin-top:25px;"
+                            >
+                                <h4
+                                    style="
+                                        margin-bottom:12px;
+                                        color:#334155;
+                                    "
+                                >
+                                    Previous Reviews
+                                </h4>
+
+                                <div
+                                    id="existingReviewsContent"
+                                    style="color:#64748b;"
+                                >
+                                    Loading previous reviews...
+                                </div>
+                            </div>
+
+                        </div>
+
+                        <p
+                            style="
+                                margin-top:12px;
+                                color:#64748b;
+                                font-size:14px;
+                                line-height:1.6;
+                            "
+                        >
+                            Clinician review records the human review decision
+                            for this research prototype. It does not make the
+                            AI output a confirmed medical diagnosis.
+                        </p>
+
+                    </div>
+
                 `;
+
+                // --------------------------------------------------
+                // AI TRIAGE
+                // --------------------------------------------------
+                // Retrieve the triage result that the backend calculated
+                // and saved during the AI analysis request.
+                // Triage is workflow priority, not a diagnosis.
+                // --------------------------------------------------
+
+                const triageContent =
+                    document.getElementById("triageContent");
+
+                try {
+
+                    const triageResponse =
+                        await fetch(
+                            API_URL +
+                            "/api/analysis/" +
+                            currentStudyId +
+                            "/triage"
+                        );
+
+                    const triageResult =
+                        await triageResponse.json();
+
+                    if (!triageResponse.ok) {
+
+                        throw new Error(
+                            triageResult.detail ||
+                            "Could not retrieve the triage result."
+                        );
+
+                    }
+
+                    if (
+                        !triageResult.triage_available ||
+                        !triageResult.triage
+                    ) {
+
+                        triageContent.innerHTML = `
+
+                            <div
+                                style="
+                                    padding:15px;
+                                    background:#fffbeb;
+                                    border:1px solid #fde68a;
+                                    border-radius:8px;
+                                    color:#92400e;
+                                "
+                            >
+                                <strong>
+                                    ⚠️ AI triage is not available.
+                                </strong>
+
+                                <p style="margin-top:8px;">
+                                    This case should be reviewed manually.
+                                </p>
+                            </div>
+
+                        `;
+
+                    } else {
+
+                        const triage =
+                            triageResult.triage;
+
+                        let priorityClass =
+                            "";
+
+                        if (
+                            triage.priority ===
+                            "High Priority"
+                        ) {
+
+                            priorityClass =
+                                "background:#fef2f2;border:1px solid #fecaca;color:#991b1b;";
+
+                        } else if (
+                            triage.priority ===
+                            "Moderate Priority"
+                        ) {
+
+                            priorityClass =
+                                "background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;";
+
+                        } else if (
+                            triage.priority ===
+                            "Routine Review"
+                        ) {
+
+                            priorityClass =
+                                "background:#f0fdf4;border:1px solid #bbf7d0;color:#166534;";
+
+                        } else {
+
+                            priorityClass =
+                                "background:#fffbeb;border:1px solid #fde68a;color:#92400e;";
+
+                        }
+
+                        triageContent.innerHTML = `
+
+                            <div
+                                style="
+                                    ${priorityClass}
+                                    border-radius:10px;
+                                    padding:16px;
+                                "
+                            >
+
+                                <div class="result-row">
+
+                                    <span class="result-label">
+                                        Triage Priority
+                                    </span>
+
+                                    <span
+                                        class="result-value"
+                                        style="font-weight:700;"
+                                    >
+                                        ${triage.priority}
+                                    </span>
+
+                                </div>
+
+                                <div
+                                    class="result-row"
+                                    style="margin-top:12px;"
+                                >
+
+                                    <span class="result-label">
+                                        Reason
+                                    </span>
+
+                                    <span
+                                        class="result-value"
+                                        style="max-width:70%;"
+                                    >
+                                        ${triage.reason || "No reason provided."}
+                                    </span>
+
+                                </div>
+
+                            </div>
+
+                            <p
+                                style="
+                                    margin-top:15px;
+                                    color:#64748b;
+                                    font-size:14px;
+                                    line-height:1.6;
+                                "
+                            >
+                                Triage is an operational workflow priority
+                                and is not a medical diagnosis. Clinician
+                                review is required before clinical
+                                interpretation or action.
+                            </p>
+
+                        `;
+
+                    }
+
+                }
+
+                catch (triageError) {
+
+                    triageContent.innerHTML = `
+
+                        <div
+                            style="
+                                padding:15px;
+                                background:#fef2f2;
+                                border:1px solid #fecaca;
+                                border-radius:8px;
+                                color:#991b1b;
+                            "
+                        >
+
+                            <strong>
+                                ⚠️ Could not load AI triage
+                            </strong>
+
+                            <p style="margin-top:8px;">
+                                ${triageError.message}
+                            </p>
+
+                        </div>
+
+                    `;
+
+                    console.error(
+                        "Triage retrieval error:",
+                        triageError
+                    );
+
+                }
+
+
+                // --------------------------------------------------
+                // CLINICIAN REVIEW
+                // --------------------------------------------------
+                // Load previously saved reviews for this study and
+                // provide a form for recording a new human review.
+                // --------------------------------------------------
+
+                const clinicianReviewMessage =
+                    document.getElementById(
+                        "clinicianReviewMessage"
+                    );
+
+                const existingReviewsContent =
+                    document.getElementById(
+                        "existingReviewsContent"
+                    );
+
+                const submitClinicianReview =
+                    document.getElementById(
+                        "submitClinicianReview"
+                    );
+
+                const clinicianName =
+                    document.getElementById(
+                        "clinicianName"
+                    );
+
+                const reviewStatus =
+                    document.getElementById(
+                        "reviewStatus"
+                    );
+
+                const finalDecision =
+                    document.getElementById(
+                        "finalDecision"
+                    );
+
+                const reviewComments =
+                    document.getElementById(
+                        "reviewComments"
+                    );
+
+                function showClinicianReviewMessage(
+                    message,
+                    isError = false
+                ) {
+
+                    clinicianReviewMessage.style.display =
+                        "block";
+
+                    clinicianReviewMessage.textContent =
+                        message;
+
+                    clinicianReviewMessage.style.background =
+                        isError
+                            ? "#fef2f2"
+                            : "#f0fdf4";
+
+                    clinicianReviewMessage.style.border =
+                        isError
+                            ? "1px solid #fecaca"
+                            : "1px solid #bbf7d0";
+
+                    clinicianReviewMessage.style.color =
+                        isError
+                            ? "#991b1b"
+                            : "#166534";
+                }
+
+                function escapeReviewText(value) {
+
+                    return String(value ?? "")
+                        .replace(/&/g, "&amp;")
+                        .replace(/</g, "&lt;")
+                        .replace(/>/g, "&gt;")
+                        .replace(/"/g, "&quot;")
+                        .replace(/'/g, "&#039;");
+                }
+
+                async function loadClinicianReviews(studyId = currentStudyId) {
+
+                    const reviewsContainer =
+                        document.getElementById("existingReviewsContent");
+
+                    if (!reviewsContainer) {
+                        console.error(
+                            "Previous Reviews container was not found."
+                        );
+                        return;
+                    }
+
+                    if (!studyId) {
+                        reviewsContainer.innerHTML =
+                            "<p>No study is currently selected.</p>";
+                        return;
+                    }
+
+                    reviewsContainer.innerHTML =
+                        "Loading previous reviews...";
+
+                    try {
+
+                        const response =
+                            await fetch(
+                                API_URL +
+                                "/api/analysis/" +
+                                studyId +
+                                "/review"
+                            );
+
+                        const result =
+                            await response.json();
+
+                        console.log(
+                            "Clinician reviews received:",
+                            result
+                        );
+
+                        if (!response.ok) {
+
+                            throw new Error(
+                                result.detail ||
+                                "Could not load clinician reviews."
+                            );
+
+                        }
+
+                        const reviews =
+                            Array.isArray(result.reviews)
+                                ? result.reviews
+                                : [];
+
+                        if (reviews.length === 0) {
+
+                            reviewsContainer.innerHTML =
+                                "<p>No clinician reviews have been recorded yet.</p>";
+
+                            return;
+                        }
+
+                        reviewsContainer.innerHTML =
+                            reviews
+                                .map(function(review) {
+
+                                    return `
+                                        <div
+                                            style="
+                                                margin-bottom:12px;
+                                                padding:15px;
+                                                background:white;
+                                                border:1px solid #e2e8f0;
+                                                border-radius:8px;
+                                            "
+                                        >
+
+                                            <div class="result-row">
+                                                <span class="result-label">
+                                                    Clinician
+                                                </span>
+
+                                                <span class="result-value">
+                                                    ${escapeReviewText(
+                                                        review.clinician_name
+                                                    )}
+                                                </span>
+                                            </div>
+
+                                            <div
+                                                class="result-row"
+                                                style="margin-top:8px;"
+                                            >
+                                                <span class="result-label">
+                                                    Status
+                                                </span>
+
+                                                <span class="result-value">
+                                                    ${escapeReviewText(
+                                                        review.review_status
+                                                    )}
+                                                </span>
+                                            </div>
+
+                                            <div
+                                                class="result-row"
+                                                style="margin-top:8px;"
+                                            >
+                                                <span class="result-label">
+                                                    Decision
+                                                </span>
+
+                                                <span class="result-value">
+                                                    ${escapeReviewText(
+                                                        review.final_decision
+                                                    )}
+                                                </span>
+                                            </div>
+
+                                            <div
+                                                class="result-row"
+                                                style="margin-top:8px;"
+                                            >
+                                                <span class="result-label">
+                                                    Comments
+                                                </span>
+
+                                                <span
+                                                    class="result-value"
+                                                    style="max-width:70%;"
+                                                >
+                                                    ${escapeReviewText(
+                                                        review.comments ||
+                                                        "No comments."
+                                                    )}
+                                                </span>
+                                            </div>
+
+                                            <div
+                                                style="
+                                                    margin-top:10px;
+                                                    color:#64748b;
+                                                    font-size:13px;
+                                                "
+                                            >
+                                                Created:
+                                                ${escapeReviewText(
+                                                    review.created_at
+                                                )}
+                                            </div>
+
+                                        </div>
+                                    `;
+
+                                })
+                                .join("");
+
+                    }
+
+                    catch (reviewError) {
+
+                        reviewsContainer.innerHTML = `
+
+                            <div
+                                style="
+                                    padding:12px;
+                                    background:#fef2f2;
+                                    border:1px solid #fecaca;
+                                    border-radius:8px;
+                                    color:#991b1b;
+                                "
+                            >
+                                Could not load previous reviews:
+                                ${escapeReviewText(
+                                    reviewError.message
+                                )}
+                            </div>
+
+                        `;
+
+                        console.error(
+                            "Clinician review retrieval error:",
+                            reviewError
+                        );
+
+                    }
+
+                }
+
+                // --------------------------------------------------
+                // CLINICIAN REVIEW SUBMISSION
+                // --------------------------------------------------
+                // The AI Analysis result is rendered dynamically.
+                // Therefore, do NOT attach the click handler directly
+                // to the button at page-load time. Use event delegation
+                // so the button works after the analysis section appears.
+                // --------------------------------------------------
+
+                document.addEventListener(
+                    "click",
+                    async (event) => {
+
+                        const button =
+                            event.target.closest(
+                                "#submitClinicianReview"
+                            );
+
+                        if (!button) {
+                            return;
+                        }
+
+                        event.preventDefault();
+                        event.stopPropagation();
+
+                        const clinicianNameInput =
+                            document.getElementById(
+                                "clinicianName"
+                            );
+
+                        const reviewStatusInput =
+                            document.getElementById(
+                                "reviewStatus"
+                            );
+
+                        const finalDecisionInput =
+                            document.getElementById(
+                                "finalDecision"
+                            );
+
+                        const reviewCommentsInput =
+                            document.getElementById(
+                                "reviewComments"
+                            );
+
+                        const messageBox =
+                            document.getElementById(
+                                "clinicianReviewMessage"
+                            );
+
+                        if (
+                            !clinicianNameInput ||
+                            !reviewStatusInput ||
+                            !finalDecisionInput ||
+                            !reviewCommentsInput
+                        ) {
+
+                            console.error(
+                                "Clinician Review form elements were not found."
+                            );
+
+                            return;
+                        }
+
+                        if (!currentStudyId) {
+
+                            if (messageBox) {
+                                messageBox.style.display = "block";
+                                messageBox.style.background = "#fef2f2";
+                                messageBox.style.color = "#991b1b";
+                                messageBox.textContent =
+                                    "No study is currently selected for review.";
+                            }
+
+                            return;
+                        }
+
+                        const name =
+                            clinicianNameInput.value.trim();
+
+                        const status =
+                            reviewStatusInput.value;
+
+                        const decision =
+                            finalDecisionInput.value;
+
+                        const comments =
+                            reviewCommentsInput.value.trim();
+
+                        if (!name) {
+
+                            if (messageBox) {
+                                messageBox.style.display = "block";
+                                messageBox.style.background = "#fef2f2";
+                                messageBox.style.color = "#991b1b";
+                                messageBox.textContent =
+                                    "Please enter the clinician name.";
+                            }
+
+                            clinicianNameInput.focus();
+                            return;
+                        }
+
+                        button.disabled = true;
+                        button.textContent =
+                            "Saving Review...";
+
+                        try {
+
+                            const response =
+                                await fetch(
+                                    API_URL +
+                                    "/api/analysis/" +
+                                    currentStudyId +
+                                    "/review",
+                                    {
+                                        method: "POST",
+                                        headers: {
+                                            "Content-Type":
+                                                "application/json"
+                                        },
+                                        body: JSON.stringify({
+                                            clinician_name: name,
+                                            review_status: status,
+                                            final_decision: decision,
+                                            comments:
+                                                comments || null
+                                        })
+                                    }
+                                );
+
+                            const result =
+                                await response.json();
+
+                            if (!response.ok) {
+                                throw new Error(
+                                    result.detail ||
+                                    "Failed to save clinician review."
+                                );
+                            }
+
+                            if (messageBox) {
+                                messageBox.style.display = "block";
+                                messageBox.style.background = "#f0fdf4";
+                                messageBox.style.border =
+                                    "1px solid #bbf7d0";
+                                messageBox.style.color = "#166534";
+                                messageBox.textContent =
+                                    "Clinician review saved successfully.";
+                            }
+
+                            reviewCommentsInput.value = "";
+
+                            await loadClinicianReviews(result.study_id);
+
+                            console.log(
+                                "Clinician review saved:",
+                                result
+                            );
+
+                        } catch (reviewError) {
+
+                            if (messageBox) {
+                                messageBox.style.display = "block";
+                                messageBox.style.background = "#fef2f2";
+                                messageBox.style.border =
+                                    "1px solid #fecaca";
+                                messageBox.style.color = "#991b1b";
+                                messageBox.textContent =
+                                    reviewError.message;
+                            }
+
+                            console.error(
+                                "Clinician review submission error:",
+                                reviewError
+                            );
+
+                        } finally {
+
+                            button.disabled = false;
+                            button.textContent =
+                                "Submit Clinician Review";
+
+                        }
+
+                    }
+                );
+
+                // Do not call loadClinicianReviews() here because the
+                // review section is created dynamically after analysis.
+                // It will be called immediately after the review HTML
+                // has been inserted into the page below.
 
                 // --------------------------------------------------
                 // XAI / GRAD-CAM
@@ -3803,6 +4728,10 @@
                 // Ask the FastAPI backend to generate the Grad-CAM
                 // explanation for this study, then display it.
                 // --------------------------------------------------
+
+                // The clinician review form is now in the DOM, so load
+                // all previously saved reviews for this study.
+                await loadClinicianReviews(currentStudyId);
 
                 resultBox.innerHTML += `
 
@@ -3876,9 +4805,10 @@
                     // Convert the backend filesystem path such as:
                     // xai_outputs\\study_6_cardiomegaly_gradcam.png
                     // into the browser-accessible API endpoint.
-                    const imageFilename = String(imagePath)
-                        .split(/[\\\\/]/)
-                        .pop();
+                    const imageFilename =
+                        String(imagePath)
+                            .split(/[\\/]/)
+                            .pop();
 
                     const imageUrl =
                         API_URL +
