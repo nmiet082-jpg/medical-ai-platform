@@ -1242,6 +1242,9 @@
 
                                 <label>
                                     Patient ID
+                                    <small style="color:#64748b;">
+                                        (create your own ID, e.g. P002)
+                                    </small>
                                 </label>
 
                                 <input
@@ -1517,6 +1520,53 @@
                     </div>
 
 
+                    <div class="form-group">
+
+                        <label for="imageStudyType">
+                            Study Type
+                        </label>
+
+                        <select
+                            id="imageStudyType"
+                            class="form-control"
+                        >
+                            <option value="Chest X-Ray">
+                                Chest X-Ray
+                            </option>
+                        </select>
+
+                    </div>
+
+
+                    <div class="form-group">
+
+                        <label for="imageStudyDate">
+                            Study Date
+                        </label>
+
+                        <input
+                            type="date"
+                            id="imageStudyDate"
+                            class="form-control"
+                        >
+
+                    </div>
+
+
+                    <div
+                        id="currentStudyInfo"
+                        style="
+                            display:none;
+                            margin:12px 0;
+                            padding:12px;
+                            border-radius:8px;
+                            background:#f0fdf4;
+                            color:#166534;
+                            font-weight:600;
+                        "
+                    ></div>
+
+
                     <div class="upload-box">
 
                         <div class="upload-icon">
@@ -1542,7 +1592,7 @@
                         class="btn btn-primary"
                         onclick="uploadMedicalImage()"
                     >
-                        Upload Image
+                        Create Study & Upload X-Ray
                     </button>
 
                 </div>
@@ -1589,7 +1639,7 @@
                 >
 
                     <h2>
-                        CNN Analysis Result
+                        AI Analysis Result
                     </h2>
 
 
@@ -1752,6 +1802,8 @@
 
         let currentFileId = null;
 
+        let currentStudyId = null;
+
 
         /* =====================================================
            LOGIN
@@ -1913,7 +1965,7 @@
 
             applyRoleAccess();
 
-            displayPatients();
+            loadPatientsFromBackend();
 
             updateDashboard();
 
@@ -2046,7 +2098,7 @@
            SAVE / UPDATE PATIENT
         ===================================================== */
 
-        function savePatient(event) {
+        async function savePatient(event) {
 
             event.preventDefault();
 
@@ -2066,9 +2118,11 @@
 
 
             const age =
-                document
-                    .getElementById("patientAge")
-                    .value;
+                Number(
+                    document
+                        .getElementById("patientAge")
+                        .value
+                );
 
 
             const gender =
@@ -2077,86 +2131,315 @@
                     .value;
 
 
-            const studyType =
-                document
-                    .getElementById("studyType")
-                    .value;
+            if (
+                !id ||
+                !name ||
+                !age ||
+                !gender
+            ) {
+
+                alert(
+                    "Please fill in Patient ID, Name, Age and Gender."
+                );
+
+                return;
+
+            }
 
 
-            const studyDate =
-                document
-                    .getElementById("studyDate")
-                    .value;
-
-
-            const patient = {
-
-                id: id,
-
-                name: name,
-
-                age: age,
-
-                gender: gender,
-
-                studyType: studyType,
-
-                studyDate: studyDate,
-
-                status: "Active"
-
-            };
-
+            // --------------------------------------------------
+            // Create the patient in the REAL backend database.
+            // The user-created Patient ID (for example P002)
+            // is sent to FastAPI. The numeric database ID stays
+            // internal and is used automatically for studies.
+            // --------------------------------------------------
 
             if (
                 editIndex === -1
             ) {
 
-                patients.push(
-                    patient
-                );
+                try {
 
-                alert(
-                    "Patient added successfully."
-                );
+                    const response =
+                        await fetch(
+                            API_URL +
+                            "/api/patients",
+                            {
 
-            } else {
+                                method: "POST",
 
-                patients[
-                    editIndex
-                ] = patient;
+                                headers: {
+                                    "Content-Type":
+                                        "application/json"
+                                },
 
-                editIndex = -1;
+                                body: JSON.stringify({
+
+                                    patient_id: id,
+
+                                    name: name,
+
+                                    age: age,
+
+                                    gender: gender
+
+                                })
+
+                            }
+                        );
 
 
-                document
-                    .getElementById(
-                        "savePatientButton"
-                    )
-                    .textContent =
-                    "Save Patient";
+                    const result =
+                        await response.json();
 
 
-                alert(
-                    "Patient updated successfully."
-                );
+                    if (
+                        !response.ok
+                    ) {
+
+                        throw new Error(
+                            result.detail ||
+                            "Could not create the patient."
+                        );
+
+                    }
+
+
+                    // Refresh the patient list from the backend
+                    // so the numeric database ID is available.
+                    const patientsResponse =
+                        await fetch(
+                            API_URL +
+                            "/api/patients"
+                        );
+
+
+                    const patientsResult =
+                        await patientsResponse.json();
+
+
+                    if (
+                        !patientsResponse.ok
+                    ) {
+
+                        throw new Error(
+                            patientsResult.detail ||
+                            "Patient was created, but the patient list could not be refreshed."
+                        );
+
+                    }
+
+
+                    const backendPatients =
+                        patientsResult.patients || [];
+
+
+                    const createdPatient =
+                        backendPatients.find(
+                            function(patient) {
+
+                                return (
+                                    patient.patient_id === id
+                                );
+
+                            }
+                        );
+
+
+                    if (
+                        !createdPatient
+                    ) {
+
+                        throw new Error(
+                            "Patient was created, but could not be found in the backend patient list."
+                        );
+
+                    }
+
+
+                    // Keep the frontend's local list synchronized
+                    // with the backend record.
+                    patients =
+                        backendPatients.map(
+                            function(patient) {
+
+                                return {
+
+                                    id:
+                                        patient.patient_id,
+
+                                    backendId:
+                                        patient.id,
+
+                                    name:
+                                        patient.name,
+
+                                    age:
+                                        patient.age,
+
+                                    gender:
+                                        patient.gender,
+
+                                    studyType:
+                                        "",
+
+                                    studyDate:
+                                        "",
+
+                                    status:
+                                        "Active"
+
+                                };
+
+                            }
+                        );
+
+
+                    localStorage.setItem(
+                        "patients",
+                        JSON.stringify(
+                            patients
+                        )
+                    );
+
+
+                    clearPatientForm();
+
+                    displayPatients();
+
+                    updateDashboard();
+
+                    // Refresh the Medical Images patient selector.
+                    await loadImagePatients();
+
+
+                    alert(
+                        "Patient created successfully.\n\n" +
+                        "Patient ID: " +
+                        createdPatient.patient_id
+                    );
+
+
+                    return;
+
+                }
+
+                catch (error) {
+
+                    alert(
+                        "Could not create patient:\n" +
+                        error.message
+                    );
+
+                    return;
+
+                }
 
             }
 
 
-            localStorage.setItem(
-                "patients",
-                JSON.stringify(
-                    patients
-                )
+            // Editing is kept separate because the current backend
+            // does not yet expose a patient-update endpoint.
+            alert(
+                "Patient editing is not connected to the backend yet. " +
+                "Create the patient first through the Save Patient button."
             );
 
+        }
 
-            clearPatientForm();
+        /* =====================================================
+           LOAD PATIENTS FROM BACKEND
+        ===================================================== */
 
-            displayPatients();
+        async function loadPatientsFromBackend() {
 
-            updateDashboard();
+            try {
+
+                const response =
+                    await fetch(
+                        API_URL +
+                        "/api/patients"
+                    );
+
+
+                const result =
+                    await response.json();
+
+
+                if (
+                    !response.ok
+                ) {
+
+                    throw new Error(
+                        result.detail ||
+                        "Could not load patients."
+                    );
+
+                }
+
+
+                const backendPatients =
+                    result.patients || [];
+
+
+                patients =
+                    backendPatients.map(
+                        function(patient) {
+
+                            return {
+
+                                id:
+                                    patient.patient_id,
+
+                                backendId:
+                                    patient.id,
+
+                                name:
+                                    patient.name,
+
+                                age:
+                                    patient.age,
+
+                                gender:
+                                    patient.gender,
+
+                                studyType:
+                                    "",
+
+                                studyDate:
+                                    "",
+
+                                status:
+                                    "Active"
+
+                            };
+
+                        }
+                    );
+
+
+                localStorage.setItem(
+                    "patients",
+                    JSON.stringify(
+                        patients
+                    )
+                );
+
+
+                displayPatients();
+
+                updateDashboard();
+
+            }
+
+            catch (error) {
+
+                console.error(
+                    "Backend patient loading error:",
+                    error
+                );
+
+            }
 
         }
 
@@ -2611,7 +2894,7 @@
            LOAD PATIENTS FOR IMAGE UPLOAD
         ===================================================== */
 
-        function loadImagePatients() {
+        async function loadImagePatients() {
 
             const patientSelect =
                 document.getElementById(
@@ -2629,40 +2912,122 @@
             patientSelect.innerHTML = `
 
                 <option value="">
-                    Select Patient
+                    Loading patients...
                 </option>
 
             `;
 
 
-            patients.forEach(
-                function(patient) {
+            try {
 
-                    const option =
-                        document.createElement(
-                            "option"
-                        );
-
-
-                    option.value =
-                        patient.id;
+                const response =
+                    await fetch(
+                        API_URL +
+                        "/api/patients"
+                    );
 
 
-                    option.textContent =
-                        patient.id +
-                        " - " +
-                        patient.name;
+                const result =
+                    await response.json();
 
 
-                    patientSelect.appendChild(
-                        option
+                if (
+                    !response.ok
+                ) {
+
+                    throw new Error(
+                        result.detail ||
+                        "Could not load patients."
                     );
 
                 }
-            );
+
+
+                const backendPatients =
+                    result.patients || [];
+
+
+                patientSelect.innerHTML = `
+
+                    <option value="">
+                        Select Patient
+                    </option>
+
+                `;
+
+
+                if (
+                    backendPatients.length === 0
+                ) {
+
+                    patientSelect.innerHTML = `
+
+                        <option value="">
+                            No patients found
+                        </option>
+
+                    `;
+
+                    return;
+
+                }
+
+
+                backendPatients.forEach(
+                    function(patient) {
+
+                        const option =
+                            document.createElement(
+                                "option"
+                            );
+
+
+                        // IMPORTANT:
+                        // The backend expects the numeric database ID.
+                        option.value =
+                            patient.id;
+
+
+                        option.textContent =
+                            patient.patient_id +
+                            " - " +
+                            patient.name;
+
+
+                        patientSelect.appendChild(
+                            option
+                        );
+
+                    }
+                );
+
+            }
+
+            catch (error) {
+
+                patientSelect.innerHTML = `
+
+                    <option value="">
+                        Could not load patients
+                    </option>
+
+                `;
+
+
+                console.error(
+                    "Patient loading error:",
+                    error
+                );
+
+
+                alert(
+                    "Could not load patients from the backend.\n" +
+                    error.message
+                );
+
+            }
 
         }
-
 
         /* =====================================================
            UPLOAD MEDICAL IMAGE
@@ -2674,6 +3039,18 @@
             const patientSelect =
                 document.getElementById(
                     "imagePatient"
+                );
+
+
+            const studyTypeSelect =
+                document.getElementById(
+                    "imageStudyType"
+                );
+
+
+            const studyDateInput =
+                document.getElementById(
+                    "imageStudyDate"
                 );
 
 
@@ -2701,7 +3078,7 @@
             ) {
 
                 alert(
-                    "Please select a medical image."
+                    "Please select a chest X-ray."
                 );
 
                 return;
@@ -2755,22 +3132,116 @@
             }
 
 
-            const formData =
-                new FormData();
+            const studyType =
+                studyTypeSelect.value ||
+                "Chest X-Ray";
 
 
-            formData.append(
-                "file",
-                file
-            );
+            const studyDate =
+                studyDateInput.value ||
+                new Date()
+                    .toISOString()
+                    .split("T")[0];
 
 
             try {
 
-                const response =
+                // --------------------------------------------------
+                // 1. Create the study automatically
+                // --------------------------------------------------
+
+                const studyResponse =
                     await fetch(
                         API_URL +
-                        "/api/studies/upload",
+                        "/api/studies",
+                        {
+
+                            method: "POST",
+
+                            headers: {
+                                "Content-Type":
+                                    "application/json"
+                            },
+
+                            body: JSON.stringify({
+
+                                patient_id:
+                                    Number(
+                                        patientSelect.value
+                                    ),
+
+                                study_type:
+                                    studyType,
+
+                                study_date:
+                                    studyDate
+
+                            })
+
+                        }
+                    );
+
+
+                const studyResult =
+                    await studyResponse.json();
+
+
+                if (
+                    !studyResponse.ok
+                ) {
+
+                    throw new Error(
+                        studyResult.detail ||
+                        "Could not create the study."
+                    );
+
+                }
+
+
+                currentStudyId =
+                    studyResult.study_id;
+
+
+                const studyInfo =
+                    document.getElementById(
+                        "currentStudyInfo"
+                    );
+
+
+                studyInfo.style.display =
+                    "block";
+
+
+                studyInfo.innerHTML = `
+                    Study created successfully.
+                    The system assigned Study ID
+                    ${currentStudyId}.
+                `;
+
+
+                // --------------------------------------------------
+                // 2. Upload the image to that study automatically
+                // --------------------------------------------------
+
+                const formData =
+                    new FormData();
+
+
+                formData.append(
+                    "file",
+                    file
+                );
+
+
+                // FastAPI defines study_id as a query parameter,
+                // so it must be included in the upload URL.
+                const uploadResponse =
+                    await fetch(
+                        API_URL +
+                        "/api/studies/upload?study_id=" +
+                        encodeURIComponent(
+                            currentStudyId
+                        ),
                         {
 
                             method: "POST",
@@ -2781,47 +3252,49 @@
                     );
 
 
-                const result =
-                    await response.json();
+                const uploadResult =
+                    await uploadResponse.json();
 
 
                 if (
-                    !response.ok
+                    !uploadResponse.ok
                 ) {
 
                     throw new Error(
-                        result.detail ||
-                        "Upload failed."
+                        uploadResult.detail ||
+                        "Image upload failed."
                     );
 
                 }
 
 
                 currentFileId =
-                    result.file_id;
+                    uploadResult.file_id;
 
 
                 alert(
-                    "Image uploaded successfully."
+                    "Study created and X-ray uploaded successfully."
                 );
 
 
-                await validateUploadedImage();
+                // --------------------------------------------------
+                // 3. Continue automatically to validation
+                // --------------------------------------------------
 
+                await validateUploadedImage();
 
             }
 
             catch (error) {
 
                 alert(
-                    "Upload failed:\n" +
+                    "Could not create the study or upload the X-ray:\n" +
                     error.message
                 );
 
             }
 
         }
-
 
         /* =====================================================
            VALIDATE IMAGE
@@ -2927,7 +3400,7 @@
                 }
 
 
-                let html = `
+                validationResult.innerHTML = `
 
                     <div class="result-row">
 
@@ -2949,190 +3422,131 @@
                     <div class="result-row">
 
                         <span class="result-label">
-                            File Type
+                            Dimensions
                         </span>
 
                         <span class="result-value">
-                            ${result.type || "Unknown"}
+                            ${result.width} × ${result.height}
                         </span>
 
                     </div>
 
-                `;
-
-
-                if (
-                    result.type === "DICOM"
-                ) {
-
-                    html += `
-
-                        <div class="result-row">
-
-                            <span class="result-label">
-                                Modality
-                            </span>
-
-                            <span class="result-value">
-                                ${result.modality || "Not available"}
-                            </span>
-
-                        </div>
-
-
-                        <div class="result-row">
-
-                            <span class="result-label">
-                                Dimensions
-                            </span>
-
-                            <span class="result-value">
-                                ${result.rows}
-                                ×
-                                ${result.columns}
-                            </span>
-
-                        </div>
-
-
-                        <div class="result-row">
-
-                            <span class="result-label">
-                                Pixel Data
-                            </span>
-
-                            <span class="result-value">
-                                ${
-                                    result.has_pixel_data
-                                    ? "Available"
-                                    : "Not Available"
-                                }
-                            </span>
-
-                        </div>
-
-
-                        <div class="result-row">
-
-                            <span class="result-label">
-                                SOP Class UID
-                            </span>
-
-                            <span class="result-value">
-                                ${
-                                    result.sop_class_uid ||
-                                    "Not available"
-                                }
-                            </span>
-
-                        </div>
-
-                    `;
-
-                }
-
-                else {
-
-                    html += `
-
-                        <div class="result-row">
-
-                            <span class="result-label">
-                                Dimensions
-                            </span>
-
-                            <span class="result-value">
-                                ${result.width}
-                                ×
-                                ${result.height}
-                            </span>
-
-                        </div>
-
-
-                        <div class="result-row">
-
-                            <span class="result-label">
-                                Format
-                            </span>
-
-                            <span class="result-value">
-                                ${result.format}
-                            </span>
-
-                        </div>
-
-
-                        <div class="result-row">
-
-                            <span class="result-label">
-                                Color Mode
-                            </span>
-
-                            <span class="result-value">
-                                ${result.mode}
-                            </span>
-
-                        </div>
-
-                    `;
-
-                }
-
-
-                html += `
 
                     <div class="result-row">
 
                         <span class="result-label">
-                            Model Compatible
+                            Format
                         </span>
 
                         <span class="result-value">
-
-                            ${
-                                result.model_compatible
-                                ? "Yes"
-                                : "No"
-                            }
-
+                            ${result.format || "Unknown"}
                         </span>
 
+                    </div>
+
+
+                    <div class="result-row">
+
+                        <span class="result-label">
+                            Color Mode
+                        </span>
+
+                        <span class="result-value">
+                            ${result.mode || "Unknown"}
+                        </span>
+
+                    </div>
+
+
+                    <div
+                        id="preprocessingStatus"
+                        style="
+                            margin-top:15px;
+                            font-weight:600;
+                        "
+                    >
+                        Preparing image for AI analysis...
                     </div>
 
                 `;
 
 
-                validationResult.innerHTML =
-                    html;
+                // --------------------------------------------------
+                // Preprocess automatically after successful validation
+                // --------------------------------------------------
+
+                const preprocessResponse =
+                    await fetch(
+
+                        API_URL +
+                        "/api/studies/" +
+                        currentFileId +
+                        "/preprocess",
+
+                        {
+
+                            method: "POST"
+
+                        }
+
+                    );
+
+
+                const preprocessResult =
+                    await preprocessResponse.json();
 
 
                 if (
-                    result.model_compatible
+                    !preprocessResponse.ok
                 ) {
 
-                    document
-                        .getElementById(
-                            "cnnButton"
-                        )
-                        .style.display =
-                        "inline-block";
+                    throw new Error(
+                        preprocessResult.detail ||
+                        "Preprocessing failed."
+                    );
 
                 }
+
+
+                const preprocessingStatus =
+                    document.getElementById(
+                        "preprocessingStatus"
+                    );
+
+
+                preprocessingStatus.innerHTML = `
+                    <span class="status">
+                        Preprocessing Completed
+                    </span>
+                `;
+
+
+                document
+                    .getElementById(
+                        "cnnButton"
+                    )
+                    .style.display =
+                    "inline-block";
 
             }
 
             catch (error) {
 
                 alert(
-                    "Validation error:\n" +
+                    "Validation/preprocessing error:\n" +
                     error.message
                 );
+
+                document
+                    .getElementById(
+                        "cnnButton"
+                    )
+                    .style.display =
+                    "none";
 
             }
 
         }
-
 
         /* =====================================================
            CNN ANALYSIS
@@ -3146,6 +3560,19 @@
 
                 alert(
                     "Please upload and validate an image first."
+                );
+
+                return;
+
+            }
+
+
+            if (
+                !currentStudyId
+            ) {
+
+                alert(
+                    "No study is associated with this X-ray."
                 );
 
                 return;
@@ -3172,7 +3599,7 @@
             resultBox.innerHTML = `
 
                 <p>
-                    🤖 Running CNN analysis...
+                    🤖 Running AI analysis...
                 </p>
 
             `;
@@ -3184,9 +3611,8 @@
                     await fetch(
 
                         API_URL +
-                        "/api/studies/" +
-                        currentFileId +
-                        "/analyze",
+                        "/api/analysis/" +
+                        currentStudyId,
 
                         {
 
@@ -3207,10 +3633,83 @@
 
                     throw new Error(
                         result.detail ||
-                        "CNN analysis failed."
+                        "AI analysis failed."
                     );
 
                 }
+
+
+                if (
+                    !result.prediction_available ||
+                    !result.predictions ||
+                    result.predictions.length === 0
+                ) {
+
+                    throw new Error(
+                        "No AI predictions were returned."
+                    );
+
+                }
+
+
+                let predictionRows = "";
+
+
+                result.predictions.forEach(
+                    function(prediction) {
+
+                        const probability =
+                            (
+                                prediction.probability *
+                                100
+                            ).toFixed(2);
+
+
+                        const flaggedText =
+                            prediction.flagged
+                            ? "Flagged"
+                            : "Not Flagged";
+
+
+                        predictionRows += `
+
+                            <div
+                                class="result-row"
+                                style="
+                                    padding:16px 0;
+                                    border-bottom:1px solid #e2e8f0;
+                                "
+                            >
+
+                                <span class="result-label">
+                                    ${prediction.class_name}
+                                </span>
+
+                                <span class="result-value">
+
+                                    <strong>
+                                        ${probability}%
+                                    </strong>
+
+                                    <br>
+
+                                    <small>
+                                        Threshold:
+                                        ${(
+                                            prediction.threshold * 100
+                                        ).toFixed(0)}%
+                                        &nbsp; | &nbsp;
+                                        ${flaggedText}
+                                    </small>
+
+                                </span>
+
+                            </div>
+
+                        `;
+
+                    }
+                );
 
 
                 resultBox.innerHTML = `
@@ -3235,11 +3734,11 @@
                     <div class="result-row">
 
                         <span class="result-label">
-                            Predicted Class
+                            Study ID
                         </span>
 
                         <span class="result-value">
-                            ${result.predicted_class}
+                            ${result.study_id}
                         </span>
 
                     </div>
@@ -3248,23 +3747,345 @@
                     <div class="result-row">
 
                         <span class="result-label">
-                            Confidence
+                            Image
                         </span>
 
                         <span class="result-value">
-
-                            ${
-                                (
-                                    result.confidence *
-                                    100
-                                ).toFixed(2)
-                            }%
-
+                            ${result.filename}
                         </span>
 
                     </div>
 
+
+                    <div class="result-row">
+
+                        <span class="result-label">
+                            AI Model
+                        </span>
+
+                        <span class="result-value">
+                            ${result.model.model_name}
+                            <br>
+                            Version ${result.model.version}
+                        </span>
+
+                    </div>
+
+
+                    <h3
+                        style="
+                            margin-top:25px;
+                            margin-bottom:10px;
+                        "
+                    >
+                        AI Predictions
+                    </h3>
+
+                    ${predictionRows}
+
+
+                    <p
+                        style="
+                            margin-top:20px;
+                            color:#64748b;
+                            font-size:14px;
+                        "
+                    >
+                        These are AI model outputs for the research
+                        prototype and are not a confirmed medical diagnosis.
+                    </p>
+
                 `;
+
+                // --------------------------------------------------
+                // XAI / GRAD-CAM
+                // --------------------------------------------------
+                // Ask the FastAPI backend to generate the Grad-CAM
+                // explanation for this study, then display it.
+                // --------------------------------------------------
+
+                resultBox.innerHTML += `
+
+                    <div
+                        id="xaiSection"
+                        style="
+                            margin-top:30px;
+                            padding-top:25px;
+                            border-top:2px solid #e2e8f0;
+                        "
+                    >
+
+                        <h3 style="margin-bottom:10px;">
+                            🔍 Explainable AI (XAI)
+                        </h3>
+
+                        <p style="color:#64748b;">
+                            Generating Grad-CAM explanation...
+                        </p>
+
+                    </div>
+
+                `;
+
+                const xaiSection =
+                    document.getElementById("xaiSection");
+
+                try {
+
+                    const xaiResponse =
+                        await fetch(
+                            API_URL +
+                            "/api/analysis/" +
+                            currentStudyId +
+                            "/explanation/generate",
+                            {
+                                method: "POST"
+                            }
+                        );
+
+                    const xaiResult =
+                        await xaiResponse.json();
+
+                    if (!xaiResponse.ok) {
+
+                        throw new Error(
+                            xaiResult.detail ||
+                            "XAI generation failed."
+                        );
+
+                    }
+
+                    // The XAI backend returns its fields directly
+                    // (not inside an "explanation" object).
+                    if (
+                        !xaiResult.explanation_path
+                    ) {
+
+                        throw new Error(
+                            "The backend did not return a Grad-CAM image."
+                        );
+
+                    }
+
+                    const explanation =
+                        xaiResult;
+
+                    const imagePath =
+                        explanation.explanation_path;
+
+                    // Convert the backend filesystem path such as:
+                    // xai_outputs\\study_6_cardiomegaly_gradcam.png
+                    // into the browser-accessible API endpoint.
+                    const imageFilename = String(imagePath)
+                        .split(/[\\\\/]/)
+                        .pop();
+
+                    const imageUrl =
+                        API_URL +
+                        "/xai_outputs/" +
+                        encodeURIComponent(imageFilename);
+
+                    xaiSection.innerHTML = `
+
+                        <h3 style="
+                            margin-bottom:15px;
+                            color:#0f172a;
+                        ">
+                            🔍 Explainable AI (XAI)
+                        </h3>
+
+                        <div
+                            style="
+                                background:#f8fafc;
+                                border:1px solid #e2e8f0;
+                                border-radius:12px;
+                                padding:20px;
+                            "
+                        >
+
+                            <div class="result-row">
+
+                                <span class="result-label">
+                                    Explanation Method
+                                </span>
+
+                                <span class="result-value">
+                                    ${explanation.explanation_type || "Grad-CAM"}
+                                </span>
+
+                            </div>
+
+                            <div class="result-row">
+
+                                <span class="result-label">
+                                    Finding Explained
+                                </span>
+
+                                <span class="result-value">
+                                    ${explanation.finding || "AI finding"}
+                                </span>
+
+                            </div>
+
+                            <div class="result-row">
+
+                                <span class="result-label">
+                                    Model
+                                </span>
+
+                                <span class="result-value">
+                                    ${explanation.model_name || "ResNet18 Medical 3-Class"}
+                                </span>
+
+                            </div>
+
+                            <div class="result-row">
+
+                                <span class="result-label">
+                                    Model Version
+                                </span>
+
+                                <span class="result-value">
+                                    ${explanation.model_version || "1.0"}
+                                </span>
+
+                            </div>
+
+                            ${
+                                explanation.probability !== undefined
+                                    ? `
+                                    <div class="result-row">
+
+                                        <span class="result-label">
+                                            Probability
+                                        </span>
+
+                                        <span class="result-value">
+                                            ${
+                                                (
+                                                    Number(
+                                                        explanation.probability
+                                                    ) * 100
+                                                ).toFixed(2)
+                                            }%
+                                        </span>
+
+                                    </div>
+                                    `
+                                    : ""
+                            }
+
+                            <div
+                                style="
+                                    margin-top:20px;
+                                    text-align:center;
+                                "
+                            >
+
+                                <p
+                                    style="
+                                        color:#475569;
+                                        margin-bottom:15px;
+                                        font-weight:600;
+                                    "
+                                >
+                                    Grad-CAM Heatmap
+                                </p>
+
+                                <img
+                                    src="${imageUrl}"
+                                    alt="Grad-CAM XAI heatmap"
+                                    style="
+                                        display:block;
+                                        width:100%;
+                                        max-width:800px;
+                                        max-height:650px;
+                                        object-fit:contain;
+                                        margin:0 auto;
+                                        border-radius:10px;
+                                        border:1px solid #cbd5e1;
+                                        background:#000;
+                                    "
+                                    onerror="
+                                        this.style.display='none';
+                                        document.getElementById('xaiImageError').style.display='block';
+                                    "
+                                >
+
+                                <p
+                                    id="xaiImageError"
+                                    style="
+                                        display:none;
+                                        color:#dc2626;
+                                        margin-top:15px;
+                                        font-weight:600;
+                                    "
+                                >
+                                    The Grad-CAM image was generated, but the
+                                    browser could not load the image URL.
+                                </p>
+
+                            </div>
+
+                            <p
+                                style="
+                                    margin-top:20px;
+                                    color:#64748b;
+                                    font-size:14px;
+                                    line-height:1.6;
+                                "
+                            >
+                                The Grad-CAM heatmap shows image regions that
+                                influenced the model output. It is an AI
+                                explanation and does not by itself prove a
+                                medical condition or diagnosis.
+                            </p>
+
+                        </div>
+
+                    `;
+
+                }
+
+                catch (xaiError) {
+
+                    xaiSection.innerHTML = `
+
+                        <h3 style="
+                            margin-bottom:10px;
+                            color:#0f172a;
+                        ">
+                            🔍 Explainable AI (XAI)
+                        </h3>
+
+                        <div
+                            style="
+                                padding:15px;
+                                background:#fef2f2;
+                                border:1px solid #fecaca;
+                                border-radius:8px;
+                                color:#991b1b;
+                            "
+                        >
+
+                            <strong>
+                                ⚠️ XAI generation failed
+                            </strong>
+
+                            <p style="margin-top:8px;">
+                                ${xaiError.message}
+                            </p>
+
+                        </div>
+
+                    `;
+
+                    console.error(
+                        "XAI generation error:",
+                        xaiError
+                    );
+
+                }
 
             }
 
@@ -3278,7 +4099,7 @@
                             font-weight:600;
                         "
                     >
-                        CNN analysis unavailable.
+                        ❌ AI analysis failed.
                     </p>
 
                     <br>
@@ -3292,7 +4113,6 @@
             }
 
         }
-
 
         /* =====================================================
            LOGOUT
