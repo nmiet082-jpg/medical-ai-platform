@@ -1,75 +1,42 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import Depends
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 
 
-
-
-
-
-
 from database import get_connection, create_tables
-
-
-
-
-
+from security import verify_password, hash_password
 
 
 from fastapi.middleware.cors import CORSMiddleware
 
 
-
-
-
-
-
 from pathlib import Path
-
-
-
-
-
 
 
 from PIL import Image
 
 
-
-
-
-
-
 from pydantic import BaseModel
-
-
-
-
-
 
 
 import shutil
 
 
-
-
-
-
-
 import uuid
-
-
-
-
-
 
 
 import numpy as np
 
 
-
 import sys
 import json
+import os
+import jwt
+import torch
+import SimpleITK as sitk
 
+from datetime import datetime, timedelta, timezone
 
 
 # --------------------------------------------------
@@ -79,9 +46,7 @@ import json
 # --------------------------------------------------
 
 
-
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-
 
 
 if str(PROJECT_ROOT) not in sys.path:
@@ -89,216 +54,244 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 
-
 from ai.predict import predict_image
 from ai.xai import generate_gradcam
+# ============================================================
+# CT LUNG NODULE MODEL
+# ============================================================
+
+CT_MODEL_DIR = (
+    PROJECT_ROOT
+    / "backend"
+    / "models"
+    / "ct"
+    / "lung_nodule_model"
+)
+
+CT_MODEL_FILE = (
+    CT_MODEL_DIR
+    / "lung_nodule_3dcnn.pth"
+)
+
+if str(CT_MODEL_DIR) not in sys.path:
+    sys.path.insert(0, str(CT_MODEL_DIR))
+
+from model import LungNodule3DCNN
 
 
+ct_model = LungNodule3DCNN()
+
+ct_checkpoint = torch.load(
+    CT_MODEL_FILE,
+    map_location="cpu",
+    weights_only=False
+)
+
+if (
+    isinstance(ct_checkpoint, dict)
+    and "state_dict" in ct_checkpoint
+):
+    ct_checkpoint = ct_checkpoint["state_dict"]
+
+ct_checkpoint = {
+    key.replace("module.", "", 1): value
+    for key, value in ct_checkpoint.items()
+}
+
+ct_model.load_state_dict(ct_checkpoint)
+
+ct_model.eval()
+
+CT_NODULE_THRESHOLD = 0.20
+
+print("CT lung nodule model loaded successfully.")
 
 
+# ==================================================
+# JWT AUTHENTICATION CONFIGURATION
+# ==================================================
+
+JWT_SECRET_KEY = os.environ.get(
+    "JWT_SECRET_KEY",
+    "development-only-change-this-secret"
+)
+
+JWT_ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60
+
+bearer_scheme = HTTPBearer()
 
 
+def create_access_token(user_id: int, username: str, role: str):
+    expiration = datetime.now(timezone.utc) + timedelta(
+        minutes=ACCESS_TOKEN_EXPIRE_MINUTES
+    )
 
+    payload = {
+        "sub": str(user_id),
+        "username": username,
+        "role": role,
+        "exp": expiration
+    }
+
+    token = jwt.encode(
+        payload,
+        JWT_SECRET_KEY,
+        algorithm=JWT_ALGORITHM
+    )
+
+    return token
+
+
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)
+):
+    token = credentials.credentials
+
+    try:
+        payload = jwt.decode(
+            token,
+            JWT_SECRET_KEY,
+            algorithms=[JWT_ALGORITHM]
+        )
+
+        user_id = payload.get("sub")
+
+        if user_id is None:
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid authentication token"
+            )
+
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication token has expired"
+        )
+
+    except jwt.InvalidTokenError:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid authentication token"
+        )
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    try:
+        cursor.execute(
+            """
+            SELECT
+                id,
+                full_name,
+                username,
+                email,
+                role,
+                account_status
+            FROM users
+            WHERE id = ?
+            """,
+            (int(user_id),)
+        )
+
+        user = cursor.fetchone()
+
+        if user is None:
+            raise HTTPException(
+                status_code=401,
+                detail="User account not found"
+            )
+
+        if user["account_status"] != "ACTIVE":
+            raise HTTPException(
+                status_code=403,
+                detail="User account is not active"
+            )
+
+        return dict(user)
+
+    finally:
+        connection.close()
+
+
+def require_admin(
+    current_user: dict = Depends(get_current_user)
+):
+    if current_user["role"] != "Admin":
+        raise HTTPException(
+            status_code=403,
+            detail="Admin access required"
+        )
+
+    return current_user
 
 
 # --------------------------------------------------
-
-
-
-
-
 
 
 # FastAPI Application
 
 
-
-
-
-
-
 # --------------------------------------------------
-
-
-
-
-
 
 
 app = FastAPI(
 
-
-
-
-
-
-
     title="AI Medical Imaging Triage & XAI",
 
-
-
-
-
-
-
     version="1.0.0"
-
-
-
-
-
 
 
 )
 
 
-
-
-
-
-
 # --------------------------------------------------
-
-
-
-
-
 
 
 # Create Database Tables
 
 
-
-
-
-
-
 # --------------------------------------------------
-
-
-
-
-
 
 
 create_tables()
 
 
-
-
-
-
-
 # --------------------------------------------------
-
-
-
-
-
 
 
 # CORS
 
 
-
-
-
-
-
 # --------------------------------------------------
-
-
-
-
-
 
 
 app.add_middleware(
 
-
-
-
-
-
-
     CORSMiddleware,
-
-
-
-
-
-
 
     allow_origins=["*"],
 
-
-
-
-
-
-
     allow_credentials=True,
-
-
-
-
-
-
 
     allow_methods=["*"],
 
-
-
-
-
-
-
     allow_headers=["*"],
-
-
-
-
-
 
 
 )
 
 
-
-
-
-
-
 # --------------------------------------------------
-
-
-
-
-
 
 
 # Upload Folder
 
 
-
-
-
-
-
 # --------------------------------------------------
 
 
-
-
-
-
-
 UPLOAD_DIR = Path("uploads")
-
-
-
-
-
 
 
 UPLOAD_DIR.mkdir(exist_ok=True)
@@ -322,1346 +315,386 @@ CLASS_INDEX_MAP = {
 }
 
 
-
-
-
-
-
 # --------------------------------------------------
-
-
-
-
-
 
 
 # Allowed File Types
 
 
-
-
-
-
-
 # --------------------------------------------------
-
-
-
-
-
 
 
 ALLOWED_EXTENSIONS = {
 
-
-
-
-
-
-
     ".jpg",
-
-
-
-
-
-
 
     ".jpeg",
 
-
-
-
-
-
-
     ".png",
-
-
-
-
-
-
 
     ".dcm"
 
 
-
-
-
-
-
 }
 
+# ==================================================
+# AUTHENTICATION
+# ==================================================
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
 
 
-
-
+class AdminUserCreate(BaseModel):
+    full_name: str
+    username: str
+    email: str
+    password: str
+    role: str
 
 
 # ==================================================
-
-
-
-
-
 
 
 # PATIENT MODEL
 
 
-
-
-
-
-
 # ==================================================
-
-
-
-
-
 
 
 class PatientCreate(BaseModel):
 
-
-
-
-
-
-
     patient_id: str
-
-
-
-
-
-
 
     name: str
 
-
-
-
-
-
-
     age: int
-
-
-
-
-
-
 
     gender: str
 
 
-
-
-
-
-
 # ==================================================
-
-
-
-
-
 
 
 # STUDY MODEL
 
 
-
-
-
-
-
 # ==================================================
-
-
-
-
-
 
 
 class StudyCreate(BaseModel):
 
-
-
-
-
-
-
     patient_id: int
 
-
-
-
-
-
-
     study_type: str
-
-
-
-
-
-
 
     study_date: str
 
 
-
-
-
-
-
 # ==================================================
-
-
-
-
-
 
 
 # AI MODEL MANAGEMENT MODEL
 
 
-
-
-
-
-
 # ==================================================
-
-
-
-
-
 
 
 class AIModelCreate(BaseModel):
 
-
-
-
-
-
-
     model_name: str
-
-
-
-
-
-
 
     version: str
 
-
-
-
-
-
-
     model_path: str | None = None
-
-
-
-
-
-
 
     status: str = "Registered"
 
 
-
-
-
-
-
 # ==================================================
-
-
-
-
-
 
 
 # AI PREDICTION STORAGE MODEL
 
 
-
-
-
-
-
 # ==================================================
-
-
-
-
-
 
 
 class AIPredictionCreate(BaseModel):
 
-
-
-
-
-
-
     model_id: int
-
-
-
-
-
-
 
     abnormality: str
 
-
-
-
-
-
-
     confidence_score: float
-
-
-
-
-
-
 
     prediction_status: str = "Completed"
 
 
-
-
-
-
-
 # ============================================================
-
-
-
-
-
 
 
 # XAI / EXPLANATION MANAGEMENT
 
 
-
-
-
-
-
 # ============================================================
-
-
-
-
-
 
 
 class ExplanationCreate(BaseModel):
 
-
-
-
-
-
-
     prediction_id: int
-
-
-
-
-
-
 
     explanation_type: str
 
-
-
-
-
-
-
     model_version: str
-
-
-
-
-
-
 
     explanation_path: str | None = None
 
-
-
-
-
-
-
     metadata: str | None = None
-
-
-
-
-
 
 
 @app.post("/api/analysis/{study_id}/explanation")
 
 
-
-
-
-
-
 def create_explanation(
 
-
-
-
-
-
-
     study_id: int,
-
-
-
-
-
-
 
     explanation: ExplanationCreate
 
 
-
-
-
-
-
 ):
-
-
-
-
-
-
 
     conn = get_connection()
 
-
-
-
-
-
-
     cursor = conn.cursor()
-
-
-
-
-
-
 
     # Check that the study exists
 
-
-
-
-
-
-
     cursor.execute(
-
-
-
-
-
-
 
         "SELECT id FROM studies WHERE id = ?",
 
-
-
-
-
-
-
         (study_id,)
 
-
-
-
-
-
-
     )
-
-
-
-
-
-
 
     study = cursor.fetchone()
 
-
-
-
-
-
-
     if not study:
-
-
-
-
-
-
 
         conn.close()
 
-
-
-
-
-
-
         raise HTTPException(
 
-
-
-
-
-
-
             status_code=404,
-
-
-
-
-
-
 
             detail="Study not found"
 
-
-
-
-
-
-
         )
-
-
-
-
-
-
 
     # Check that the prediction exists
 
-
-
-
-
-
-
     cursor.execute(
 
-
-
-
-
-
-
         """
-
-
-
-
-
-
 
         SELECT id, study_id
 
-
-
-
-
-
-
         FROM ai_predictions
-
-
-
-
-
-
 
         WHERE id = ?
 
-
-
-
-
-
-
         """,
-
-
-
-
-
-
 
         (explanation.prediction_id,)
 
-
-
-
-
-
-
     )
-
-
-
-
-
-
 
     prediction = cursor.fetchone()
 
-
-
-
-
-
-
     if not prediction:
-
-
-
-
-
-
 
         conn.close()
 
-
-
-
-
-
-
         raise HTTPException(
-
-
-
-
-
-
 
             status_code=404,
 
-
-
-
-
-
-
             detail="Prediction not found"
 
-
-
-
-
-
-
         )
-
-
-
-
-
-
 
     # Make sure the prediction belongs to this study
 
-
-
-
-
-
-
     if prediction["study_id"] != study_id:
-
-
-
-
-
-
 
         conn.close()
 
-
-
-
-
-
-
         raise HTTPException(
-
-
-
-
-
-
 
             status_code=400,
 
-
-
-
-
-
-
             detail="Prediction does not belong to this study"
 
-
-
-
-
-
-
         )
-
-
-
-
-
-
 
     cursor.execute(
 
-
-
-
-
-
-
         """
-
-
-
-
-
-
 
         INSERT INTO explanations
 
-
-
-
-
-
-
         (
-
-
-
-
-
-
 
             prediction_id,
 
-
-
-
-
-
-
             explanation_type,
-
-
-
-
-
-
 
             model_version,
 
-
-
-
-
-
-
             explanation_path,
-
-
-
-
-
-
 
             metadata
 
-
-
-
-
-
-
         )
-
-
-
-
-
-
 
         VALUES (?, ?, ?, ?, ?)
 
-
-
-
-
-
-
         """,
-
-
-
-
-
-
 
         (
 
-
-
-
-
-
-
             explanation.prediction_id,
-
-
-
-
-
-
 
             explanation.explanation_type,
 
-
-
-
-
-
-
             explanation.model_version,
-
-
-
-
-
-
 
             explanation.explanation_path,
 
-
-
-
-
-
-
             explanation.metadata
-
-
-
-
-
-
 
         )
 
-
-
-
-
-
-
     )
-
-
-
-
-
-
 
     explanation_id = cursor.lastrowid
 
-
-
-
-
-
-
     conn.commit()
-
-
-
-
-
-
 
     conn.close()
 
-
-
-
-
-
-
     return {
-
-
-
-
-
-
 
         "message": "Explanation created successfully",
 
-
-
-
-
-
-
         "explanation_id": explanation_id,
-
-
-
-
-
-
 
         "study_id": study_id,
 
-
-
-
-
-
-
         "prediction_id": explanation.prediction_id,
-
-
-
-
-
-
 
         "explanation_type": explanation.explanation_type,
 
-
-
-
-
-
-
         "model_version": explanation.model_version
 
-
-
-
-
-
-
     }
-
-
-
-
-
 
 
 @app.get("/api/analysis/{study_id}/explanation")
 
 
-
-
-
-
-
 def get_explanations(study_id: int):
-
-
-
-
-
-
 
     conn = get_connection()
 
-
-
-
-
-
-
     cursor = conn.cursor()
-
-
-
-
-
-
 
     # Check that study exists
 
-
-
-
-
-
-
     cursor.execute(
-
-
-
-
-
-
 
         "SELECT id FROM studies WHERE id = ?",
 
-
-
-
-
-
-
         (study_id,)
 
-
-
-
-
-
-
     )
-
-
-
-
-
-
 
     study = cursor.fetchone()
 
-
-
-
-
-
-
     if not study:
-
-
-
-
-
-
 
         conn.close()
 
-
-
-
-
-
-
         raise HTTPException(
-
-
-
-
-
-
 
             status_code=404,
 
-
-
-
-
-
-
             detail="Study not found"
 
-
-
-
-
-
-
         )
-
-
-
-
-
-
 
     cursor.execute(
 
-
-
-
-
-
-
         """
-
-
-
-
-
-
 
         SELECT
 
-
-
-
-
-
-
             id,
-
-
-
-
-
-
 
             prediction_id,
 
-
-
-
-
-
-
             explanation_type,
-
-
-
-
-
-
 
             model_version,
 
-
-
-
-
-
-
             explanation_path,
-
-
-
-
-
-
 
             metadata,
 
-
-
-
-
-
-
             created_at
-
-
-
-
-
-
 
         FROM explanations
 
-
-
-
-
-
-
         WHERE prediction_id IN (
-
-
-
-
-
-
 
             SELECT id
 
-
-
-
-
-
-
             FROM ai_predictions
-
-
-
-
-
-
 
             WHERE study_id = ?
 
-
-
-
-
-
-
         )
-
-
-
-
-
-
 
         ORDER BY id DESC
 
-
-
-
-
-
-
         """,
-
-
-
-
-
-
 
         (study_id,)
 
-
-
-
-
-
-
     )
-
-
-
-
-
-
 
     explanations = [dict(row) for row in cursor.fetchall()]
 
-
-
-
-
-
-
     conn.close()
-
-
-
-
-
-
 
     return {
 
-
-
-
-
-
-
         "study_id": study_id,
-
-
-
-
-
-
 
         "count": len(explanations),
 
-
-
-
-
-
-
         "explanations": explanations
 
-
-
-
-
-
-
     }
-
-
-
-
-
 
 
 # ==================================================
 
 
-
-
-
-
-
 # ============================================================
-
-
-
-
-
-
 
 
 # ============================================================
@@ -2030,8970 +1063,3352 @@ def calculate_triage(predictions):
 # TRIAGE MANAGEMENT
 
 
-
-
-
-
-
 # ============================================================
-
-
-
-
-
 
 
 class TriageCreate(BaseModel):
 
-
-
-
-
-
-
     priority: str
-
-
-
-
-
-
 
     reason: str | None = None
 
 
-
-
-
-
-
 # ------------------------------------------------------------
-
-
-
-
-
 
 
 # Create Triage Result
 
 
-
-
-
-
-
 # ------------------------------------------------------------
-
-
-
-
-
 
 
 @app.post("/api/analysis/{study_id}/triage")
 
 
-
-
-
-
-
 def create_triage(
 
-
-
-
-
-
-
     study_id: int,
-
-
-
-
-
-
 
     triage: TriageCreate
 
 
-
-
-
-
-
 ):
-
-
-
-
-
-
 
     allowed_priorities = [
 
-
-
-
-
-
-
         "High Priority",
-
-
-
-
-
-
 
         "Moderate Priority",
 
-
-
-
-
-
-
         "Routine Review",
-
-
-
-
-
-
 
         "AI Inconclusive / Manual Review"
 
-
-
-
-
-
-
     ]
-
-
-
-
-
-
 
     # Check that the priority is valid
 
-
-
-
-
-
-
     if triage.priority not in allowed_priorities:
 
-
-
-
-
-
-
         raise HTTPException(
-
-
-
-
-
-
 
             status_code=400,
 
-
-
-
-
-
-
             detail={
-
-
-
-
-
-
 
                 "message": "Invalid triage priority",
 
-
-
-
-
-
-
                 "allowed_priorities": allowed_priorities
-
-
-
-
-
-
 
             }
 
-
-
-
-
-
-
         )
-
-
-
-
-
-
 
     connection = get_connection()
 
-
-
-
-
-
-
     cursor = connection.cursor()
-
-
-
-
-
-
 
     try:
 
-
-
-
-
-
-
         # Check that the study exists
-
-
-
-
-
-
 
         cursor.execute(
 
-
-
-
-
-
-
             """
-
-
-
-
-
-
 
             SELECT id
 
-
-
-
-
-
-
             FROM studies
-
-
-
-
-
-
 
             WHERE id = ?
 
-
-
-
-
-
-
             """,
-
-
-
-
-
-
 
             (study_id,)
 
-
-
-
-
-
-
         )
-
-
-
-
-
-
 
         study = cursor.fetchone()
 
-
-
-
-
-
-
         if study is None:
-
-
-
-
-
-
 
             raise HTTPException(
 
-
-
-
-
-
-
                 status_code=404,
-
-
-
-
-
-
 
                 detail="Study not found"
 
-
-
-
-
-
-
             )
-
-
-
-
-
-
 
         # Store triage result
 
-
-
-
-
-
-
         cursor.execute(
-
-
-
-
-
-
 
             """
 
-
-
-
-
-
-
             INSERT INTO triage_results (
 
-
-
-
-
-
-
                 study_id,
-
-
-
-
-
-
 
                 priority,
 
-
-
-
-
-
-
                 reason
 
-
-
-
-
-
-
             )
-
-
-
-
-
-
 
             VALUES (?, ?, ?)
 
-
-
-
-
-
-
             """,
-
-
-
-
-
-
 
             (
 
-
-
-
-
-
-
                 study_id,
-
-
-
-
-
-
 
                 triage.priority,
 
-
-
-
-
-
-
                 triage.reason
-
-
-
-
-
-
 
             )
 
-
-
-
-
-
-
         )
-
-
-
-
-
-
 
         triage_id = cursor.lastrowid
 
-
-
-
-
-
-
         connection.commit()
-
-
-
-
-
-
 
         return {
 
-
-
-
-
-
-
             "message": "Triage result created successfully",
-
-
-
-
-
-
 
             "triage_id": triage_id,
 
-
-
-
-
-
-
             "study_id": study_id,
-
-
-
-
-
-
 
             "priority": triage.priority,
 
-
-
-
-
-
-
             "reason": triage.reason
-
-
-
-
-
-
 
         }
 
-
-
-
-
-
-
     except HTTPException:
 
-
-
-
-
-
-
         connection.rollback()
-
-
-
-
-
-
 
         raise
 
-
-
-
-
-
-
     except Exception as e:
-
-
-
-
-
-
 
         connection.rollback()
 
-
-
-
-
-
-
         raise HTTPException(
-
-
-
-
-
-
 
             status_code=500,
 
-
-
-
-
-
-
             detail=f"Failed to create triage result: {str(e)}"
-
-
-
-
-
-
 
         )
 
-
-
-
-
-
-
     finally:
-
-
-
-
-
-
 
         connection.close()
 
 
-
-
-
-
-
 # ------------------------------------------------------------
-
-
-
-
-
 
 
 # Get Triage Result for a Study
 
 
-
-
-
-
-
 # ------------------------------------------------------------
-
-
-
-
-
 
 
 @app.get("/api/analysis/{study_id}/triage")
 
 
-
-
-
-
-
 def get_triage(study_id: int):
-
-
-
-
-
-
 
     connection = get_connection()
 
-
-
-
-
-
-
     cursor = connection.cursor()
-
-
-
-
-
-
 
     try:
 
-
-
-
-
-
-
         # Check that the study exists
-
-
-
-
-
-
 
         cursor.execute(
 
-
-
-
-
-
-
             """
-
-
-
-
-
-
 
             SELECT id
 
-
-
-
-
-
-
             FROM studies
-
-
-
-
-
-
 
             WHERE id = ?
 
-
-
-
-
-
-
             """,
-
-
-
-
-
-
 
             (study_id,)
 
-
-
-
-
-
-
         )
-
-
-
-
-
-
 
         study = cursor.fetchone()
 
-
-
-
-
-
-
         if study is None:
-
-
-
-
-
-
 
             raise HTTPException(
 
-
-
-
-
-
-
                 status_code=404,
-
-
-
-
-
-
 
                 detail="Study not found"
 
-
-
-
-
-
-
             )
-
-
-
-
-
-
 
         # Get the latest triage result
 
-
-
-
-
-
-
         cursor.execute(
-
-
-
-
-
-
 
             """
 
-
-
-
-
-
-
             SELECT
-
-
-
-
-
-
 
                 id,
 
-
-
-
-
-
-
                 study_id,
-
-
-
-
-
-
 
                 priority,
 
-
-
-
-
-
-
                 reason,
-
-
-
-
-
-
 
                 created_at
 
-
-
-
-
-
-
             FROM triage_results
-
-
-
-
-
-
 
             WHERE study_id = ?
 
-
-
-
-
-
-
             ORDER BY id DESC
-
-
-
-
-
-
 
             LIMIT 1
 
-
-
-
-
-
-
             """,
-
-
-
-
-
-
 
             (study_id,)
 
-
-
-
-
-
-
         )
-
-
-
-
-
-
 
         triage_result = cursor.fetchone()
 
-
-
-
-
-
-
         # No triage result yet
-
-
-
-
-
-
 
         if triage_result is None:
 
-
-
-
-
-
-
             return {
-
-
-
-
-
-
 
                 "study_id": study_id,
 
-
-
-
-
-
-
                 "triage_available": False,
-
-
-
-
-
-
 
                 "message": "No triage result available for this study"
 
-
-
-
-
-
-
             }
-
-
-
-
-
-
 
         return {
 
-
-
-
-
-
-
             "study_id": study_id,
-
-
-
-
-
-
 
             "triage_available": True,
 
-
-
-
-
-
-
             "triage": dict(triage_result)
-
-
-
-
-
-
 
         }
 
-
-
-
-
-
-
     finally:
-
-
-
-
-
-
 
         connection.close()
 
 
-
-
-
-
-
 # ============================================================
-
-
-
-
-
 
 
 # CLINICIAN REVIEW MANAGEMENT
 
 
-
-
-
-
-
 # ============================================================
-
-
-
-
-
 
 
 class ClinicianReviewCreate(BaseModel):
 
-
-
-
-
-
-
     clinician_name: str
-
-
-
-
-
-
 
     review_status: str = "Completed"
 
-
-
-
-
-
-
     final_decision: str
-
-
-
-
-
-
 
     comments: str | None = None
 
 
-
-
-
-
-
 # ------------------------------------------------------------
-
-
-
-
-
 
 
 # Create Clinician Review
 
 
-
-
-
-
-
 # ------------------------------------------------------------
-
-
-
-
-
 
 
 @app.post("/api/analysis/{study_id}/review")
 
 
-
-
-
-
-
 def create_clinician_review(
 
-
-
-
-
-
-
     study_id: int,
-
-
-
-
-
-
 
     review: ClinicianReviewCreate
 
 
-
-
-
-
-
 ):
-
-
-
-
-
-
 
     allowed_decisions = [
 
-
-
-
-
-
-
         "Accept",
-
-
-
-
-
-
 
         "Modify",
 
-
-
-
-
-
-
         "Reject"
 
-
-
-
-
-
-
     ]
-
-
-
-
-
-
 
     allowed_statuses = [
 
-
-
-
-
-
-
         "Pending",
-
-
-
-
-
-
 
         "Completed"
 
-
-
-
-
-
-
     ]
-
-
-
-
-
-
 
     # Validate review status
 
-
-
-
-
-
-
     if review.review_status not in allowed_statuses:
-
-
-
-
-
-
 
         raise HTTPException(
 
-
-
-
-
-
-
             status_code=400,
 
-
-
-
-
-
-
             detail={
-
-
-
-
-
-
 
                 "message": "Invalid review status",
 
-
-
-
-
-
-
                 "allowed_statuses": allowed_statuses
-
-
-
-
-
-
 
             }
 
-
-
-
-
-
-
         )
-
-
-
-
-
-
 
     # Validate final decision
 
-
-
-
-
-
-
     if review.final_decision not in allowed_decisions:
 
-
-
-
-
-
-
         raise HTTPException(
-
-
-
-
-
-
 
             status_code=400,
 
-
-
-
-
-
-
             detail={
-
-
-
-
-
-
 
                 "message": "Invalid final decision",
 
-
-
-
-
-
-
                 "allowed_decisions": allowed_decisions
-
-
-
-
-
-
 
             }
 
-
-
-
-
-
-
         )
-
-
-
-
-
-
 
     connection = get_connection()
 
-
-
-
-
-
-
     cursor = connection.cursor()
-
-
-
-
-
-
 
     try:
 
-
-
-
-
-
-
         # ----------------------------------------------------
-
-
-
-
-
-
 
         # Check whether the study exists
 
-
-
-
-
-
-
         # ----------------------------------------------------
-
-
-
-
-
-
 
         cursor.execute(
 
-
-
-
-
-
-
             """
-
-
-
-
-
-
 
             SELECT id
 
-
-
-
-
-
-
             FROM studies
-
-
-
-
-
-
 
             WHERE id = ?
 
-
-
-
-
-
-
             """,
-
-
-
-
-
-
 
             (study_id,)
 
-
-
-
-
-
-
         )
-
-
-
-
-
-
 
         study = cursor.fetchone()
 
-
-
-
-
-
-
         if study is None:
-
-
-
-
-
-
 
             raise HTTPException(
 
-
-
-
-
-
-
                 status_code=404,
-
-
-
-
-
-
 
                 detail="Study not found"
 
-
-
-
-
-
-
             )
 
-
-
-
-
-
-
         # ----------------------------------------------------
-
-
-
-
-
-
 
         # Store clinician review
 
-
-
-
-
-
-
         # ----------------------------------------------------
-
-
-
-
-
-
 
         cursor.execute(
 
-
-
-
-
-
-
             """
-
-
-
-
-
-
 
             INSERT INTO clinician_reviews
 
-
-
-
-
-
-
             (
 
-
-
-
-
-
-
                 study_id,
-
-
-
-
-
-
 
                 clinician_name,
 
-
-
-
-
-
-
                 review_status,
-
-
-
-
-
-
 
                 final_decision,
 
-
-
-
-
-
-
                 comments
 
-
-
-
-
-
-
             )
-
-
-
-
-
-
 
             VALUES (?, ?, ?, ?, ?)
 
-
-
-
-
-
-
             """,
-
-
-
-
-
-
 
             (
 
-
-
-
-
-
-
                 study_id,
-
-
-
-
-
-
 
                 review.clinician_name,
 
-
-
-
-
-
-
                 review.review_status,
-
-
-
-
-
-
 
                 review.final_decision,
 
-
-
-
-
-
-
                 review.comments
-
-
-
-
-
-
 
             )
 
-
-
-
-
-
-
         )
-
-
-
-
-
-
 
         review_id = cursor.lastrowid
 
-
-
-
-
-
-
         connection.commit()
-
-
-
-
-
-
 
         return {
 
-
-
-
-
-
-
             "message": "Clinician review created successfully",
-
-
-
-
-
-
 
             "review_id": review_id,
 
-
-
-
-
-
-
             "study_id": study_id,
-
-
-
-
-
-
 
             "clinician_name": review.clinician_name,
 
-
-
-
-
-
-
             "review_status": review.review_status,
-
-
-
-
-
-
 
             "final_decision": review.final_decision,
 
-
-
-
-
-
-
             "comments": review.comments
-
-
-
-
-
-
 
         }
 
-
-
-
-
-
-
     except HTTPException:
 
-
-
-
-
-
-
         connection.rollback()
-
-
-
-
-
-
 
         raise
 
-
-
-
-
-
-
     except Exception as e:
-
-
-
-
-
-
 
         connection.rollback()
 
-
-
-
-
-
-
         raise HTTPException(
-
-
-
-
-
-
 
             status_code=500,
 
-
-
-
-
-
-
             detail=f"Failed to create clinician review: {str(e)}"
-
-
-
-
-
-
 
         )
 
-
-
-
-
-
-
     finally:
-
-
-
-
-
-
 
         connection.close()
 
 
-
-
-
-
-
 # ------------------------------------------------------------
-
-
-
-
-
 
 
 # Get Clinician Reviews for a Study
 
 
-
-
-
-
-
 # ------------------------------------------------------------
-
-
-
-
-
 
 
 @app.get("/api/analysis/{study_id}/review")
 
 
-
-
-
-
-
 def get_clinician_reviews(study_id: int):
-
-
-
-
-
-
 
     connection = get_connection()
 
-
-
-
-
-
-
     cursor = connection.cursor()
-
-
-
-
-
-
 
     try:
 
-
-
-
-
-
-
         # ----------------------------------------------------
-
-
-
-
-
-
 
         # Check whether the study exists
 
-
-
-
-
-
-
         # ----------------------------------------------------
-
-
-
-
-
-
 
         cursor.execute(
 
-
-
-
-
-
-
             """
-
-
-
-
-
-
 
             SELECT id
 
-
-
-
-
-
-
             FROM studies
-
-
-
-
-
-
 
             WHERE id = ?
 
-
-
-
-
-
-
             """,
-
-
-
-
-
-
 
             (study_id,)
 
-
-
-
-
-
-
         )
-
-
-
-
-
-
 
         study = cursor.fetchone()
 
-
-
-
-
-
-
         if study is None:
-
-
-
-
-
-
 
             raise HTTPException(
 
-
-
-
-
-
-
                 status_code=404,
-
-
-
-
-
-
 
                 detail="Study not found"
 
-
-
-
-
-
-
             )
 
-
-
-
-
-
-
         # ----------------------------------------------------
-
-
-
-
-
-
 
         # Retrieve clinician reviews
 
-
-
-
-
-
-
         # ----------------------------------------------------
-
-
-
-
-
-
 
         cursor.execute(
 
-
-
-
-
-
-
             """
-
-
-
-
-
-
 
             SELECT
 
-
-
-
-
-
-
                 id,
-
-
-
-
-
-
 
                 study_id,
 
-
-
-
-
-
-
                 clinician_name,
-
-
-
-
-
-
 
                 review_status,
 
-
-
-
-
-
-
                 final_decision,
-
-
-
-
-
-
 
                 comments,
 
-
-
-
-
-
-
                 created_at
-
-
-
-
-
-
 
             FROM clinician_reviews
 
-
-
-
-
-
-
             WHERE study_id = ?
-
-
-
-
-
-
 
             ORDER BY id DESC
 
-
-
-
-
-
-
             """,
-
-
-
-
-
-
 
             (study_id,)
 
-
-
-
-
-
-
         )
-
-
-
-
-
-
 
         reviews = [dict(row) for row in cursor.fetchall()]
 
-
-
-
-
-
-
         return {
-
-
-
-
-
-
 
             "study_id": study_id,
 
-
-
-
-
-
-
             "count": len(reviews),
-
-
-
-
-
-
 
             "reviews": reviews
 
-
-
-
-
-
-
         }
 
-
-
-
-
-
-
     finally:
-
-
-
-
-
-
 
         connection.close()
 
 
-
-
-
-
-
-
-
-
-
 # ============================================================
-
 
 
 # REPORTS AND AUDIT LOGS MANAGEMENT
 
 
-
 # ============================================================
-
-
-
-
-
-
-
-
-
 
 
 class ReportCreate(BaseModel):
 
-
-
     report_status: str = "Draft"
 
-
-
     report_text: str | None = None
-
-
 
     generated_by: str | None = None
 
 
-
-
-
-
-
-
-
-
-
 class AuditLogCreate(BaseModel):
-
-
 
     action: str
 
-
-
     entity_type: str | None = None
-
-
 
     entity_id: str | None = None
 
-
-
     performed_by: str | None = None
-
-
 
     details: str | None = None
 
 
-
-
-
-
-
-
-
-
-
 # ------------------------------------------------------------
-
 
 
 # Create Report
 
 
-
 # ------------------------------------------------------------
-
-
-
-
-
 
 
 @app.post("/api/reports/{study_id}")
 
 
-
 def create_report(
 
-
-
     study_id: int,
-
-
 
     report: ReportCreate
 
 
-
 ):
-
-
-
-
-
-
 
     allowed_statuses = [
 
-
-
         "Draft",
-
-
 
         "Final"
 
-
-
     ]
-
-
-
-
-
-
 
     if report.report_status not in allowed_statuses:
 
-
-
         raise HTTPException(
-
-
 
             status_code=400,
 
-
-
             detail={
-
-
 
                 "message": "Invalid report status",
 
-
-
                 "allowed_statuses": allowed_statuses
-
-
 
             }
 
-
-
         )
-
-
-
-
-
-
 
     connection = get_connection()
 
-
-
     cursor = connection.cursor()
-
-
-
-
-
-
 
     try:
 
-
-
         cursor.execute(
-
-
 
             "SELECT id FROM studies WHERE id = ?",
 
-
-
             (study_id,)
 
-
-
         )
-
-
-
-
-
-
 
         study = cursor.fetchone()
 
-
-
-
-
-
-
         if study is None:
-
-
 
             raise HTTPException(
 
-
-
                 status_code=404,
-
-
 
                 detail="Study not found"
 
-
-
             )
-
-
-
-
-
-
 
         cursor.execute(
 
-
-
             """
-
-
 
             INSERT INTO reports (
 
-
-
                 study_id,
-
-
 
                 report_status,
 
-
-
                 report_text,
-
-
 
                 generated_by
 
-
-
             )
-
-
 
             VALUES (?, ?, ?, ?)
 
-
-
             """,
-
-
 
             (
 
-
-
                 study_id,
-
-
 
                 report.report_status,
 
-
-
                 report.report_text,
-
-
 
                 report.generated_by
 
-
-
             )
 
-
-
         )
-
-
-
-
-
-
 
         report_id = cursor.lastrowid
 
-
-
         connection.commit()
-
-
-
-
-
-
 
         return {
 
-
-
             "message": "Report created successfully",
-
-
 
             "report_id": report_id,
 
-
-
             "study_id": study_id,
-
-
 
             "report_status": report.report_status,
 
-
-
             "report_text": report.report_text,
-
-
 
             "generated_by": report.generated_by
 
-
-
         }
-
-
-
-
-
-
 
     except HTTPException:
 
-
-
         connection.rollback()
-
-
 
         raise
 
-
-
-
-
-
-
     except Exception as e:
-
-
 
         connection.rollback()
 
-
-
         raise HTTPException(
-
-
 
             status_code=500,
 
-
-
             detail=f"Failed to create report: {str(e)}"
-
-
 
         )
 
-
-
-
-
-
-
     finally:
-
-
 
         connection.close()
 
 
-
-
-
-
-
-
-
-
-
 # ------------------------------------------------------------
-
 
 
 # Get Reports for a Study
 
 
-
 # ------------------------------------------------------------
-
-
-
-
-
 
 
 @app.get("/api/reports/{study_id}")
 
 
-
 def get_reports(study_id: int):
-
-
-
-
-
-
 
     connection = get_connection()
 
-
-
     cursor = connection.cursor()
-
-
-
-
-
-
 
     try:
 
-
-
         cursor.execute(
-
-
 
             "SELECT id FROM studies WHERE id = ?",
 
-
-
             (study_id,)
 
-
-
         )
-
-
-
-
-
-
 
         study = cursor.fetchone()
 
-
-
-
-
-
-
         if study is None:
-
-
 
             raise HTTPException(
 
-
-
                 status_code=404,
-
-
 
                 detail="Study not found"
 
-
-
             )
-
-
-
-
-
-
 
         cursor.execute(
 
-
-
             """
-
-
 
             SELECT
 
-
-
                 id,
-
-
 
                 study_id,
 
-
-
                 report_status,
-
-
 
                 report_text,
 
-
-
                 generated_by,
-
-
 
                 created_at,
 
-
-
                 updated_at
-
-
 
             FROM reports
 
-
-
             WHERE study_id = ?
-
-
 
             ORDER BY id DESC
 
-
-
             """,
-
-
 
             (study_id,)
 
-
-
         )
-
-
-
-
-
-
 
         reports = [dict(row) for row in cursor.fetchall()]
 
-
-
-
-
-
-
         return {
-
-
 
             "study_id": study_id,
 
-
-
             "count": len(reports),
-
-
 
             "reports": reports
 
-
-
         }
 
-
-
-
-
-
-
     finally:
-
-
 
         connection.close()
 
 
-
-
-
-
-
-
-
-
-
 # ------------------------------------------------------------
-
 
 
 # Create Audit Log
 
 
-
 # ------------------------------------------------------------
-
-
-
-
-
 
 
 @app.post("/api/audit-logs")
 
 
-
 def create_audit_log(log: AuditLogCreate):
-
-
-
-
-
-
 
     connection = get_connection()
 
-
-
     cursor = connection.cursor()
-
-
-
-
-
-
 
     try:
 
-
-
         cursor.execute(
-
-
 
             """
 
-
-
             INSERT INTO audit_logs (
-
-
 
                 action,
 
-
-
                 entity_type,
-
-
 
                 entity_id,
 
-
-
                 performed_by,
-
-
 
                 details
 
-
-
             )
-
-
 
             VALUES (?, ?, ?, ?, ?)
 
-
-
             """,
-
-
 
             (
 
-
-
                 log.action,
-
-
 
                 log.entity_type,
 
-
-
                 log.entity_id,
-
-
 
                 log.performed_by,
 
-
-
                 log.details
-
-
 
             )
 
-
-
         )
-
-
-
-
-
-
 
         log_id = cursor.lastrowid
 
-
-
         connection.commit()
-
-
-
-
-
-
 
         return {
 
-
-
             "message": "Audit log created successfully",
-
-
 
             "audit_log_id": log_id,
 
-
-
             "action": log.action,
-
-
 
             "entity_type": log.entity_type,
 
-
-
             "entity_id": log.entity_id,
-
-
 
             "performed_by": log.performed_by,
 
-
-
             "details": log.details
-
-
 
         }
 
-
-
-
-
-
-
     except Exception as e:
-
-
 
         connection.rollback()
 
-
-
         raise HTTPException(
-
-
 
             status_code=500,
 
-
-
             detail=f"Failed to create audit log: {str(e)}"
-
-
 
         )
 
-
-
-
-
-
-
     finally:
-
-
 
         connection.close()
 
 
-
-
-
-
-
-
-
-
-
 # ------------------------------------------------------------
-
 
 
 # Get Audit Logs
 
 
-
 # ------------------------------------------------------------
-
-
-
-
-
 
 
 @app.get("/api/audit-logs")
 
 
-
 def get_audit_logs():
-
-
-
-
-
-
 
     connection = get_connection()
 
-
-
     cursor = connection.cursor()
-
-
-
-
-
-
 
     try:
 
-
-
         cursor.execute(
 
-
-
             """
-
-
 
             SELECT
 
-
-
                 id,
-
-
 
                 action,
 
-
-
                 entity_type,
-
-
 
                 entity_id,
 
-
-
                 performed_by,
-
-
 
                 details,
 
-
-
                 created_at
-
-
 
             FROM audit_logs
 
-
-
             ORDER BY id DESC
-
-
 
             """
 
-
-
         )
-
-
-
-
-
-
 
         logs = [dict(row) for row in cursor.fetchall()]
 
-
-
-
-
-
-
         return {
-
-
 
             "count": len(logs),
 
-
-
             "audit_logs": logs
-
-
 
         }
 
-
-
-
-
-
-
     finally:
 
-
-
         connection.close()
-
-
-
-
-
-
-
-
-
 
 
 # ABNORMALITY MANAGEMENT
 
 
-
-
-
-
-
 # ==================================================
 
 
-
-
-
-
-
 # --------------------------------------------------
-
-
-
-
-
 
 
 # Abnormality Request Model
 
 
-
-
-
-
-
 # --------------------------------------------------
-
-
-
-
-
 
 
 class AbnormalityCreate(BaseModel):
 
-
-
-
-
-
-
     name: str
 
-
-
-
-
-
-
     description: str | None = None
-
-
-
-
-
-
 
     status: str = "Active"
 
 
-
-
-
-
-
 # --------------------------------------------------
-
-
-
-
-
 
 
 # Create Abnormality
 
 
-
-
-
-
-
 # --------------------------------------------------
-
-
-
-
-
 
 
 @app.post("/api/abnormalities")
 
 
-
-
-
-
-
 def create_abnormality(abnormality: AbnormalityCreate):
-
-
-
-
-
-
 
     connection = get_connection()
 
-
-
-
-
-
-
     cursor = connection.cursor()
-
-
-
-
-
-
 
     try:
 
-
-
-
-
-
-
         cursor.execute(
-
-
-
-
-
-
 
             """
 
-
-
-
-
-
-
             INSERT INTO abnormalities (
-
-
-
-
-
-
 
                 name,
 
-
-
-
-
-
-
                 description,
-
-
-
-
-
-
 
                 status
 
-
-
-
-
-
-
             )
-
-
-
-
-
-
 
             VALUES (?, ?, ?)
 
-
-
-
-
-
-
             """,
-
-
-
-
-
-
 
             (
 
-
-
-
-
-
-
                 abnormality.name,
-
-
-
-
-
-
 
                 abnormality.description,
 
-
-
-
-
-
-
                 abnormality.status
-
-
-
-
-
-
 
             )
 
-
-
-
-
-
-
         )
-
-
-
-
-
-
 
         connection.commit()
 
-
-
-
-
-
-
         abnormality_id = cursor.lastrowid
-
-
-
-
-
-
 
         return {
 
-
-
-
-
-
-
             "message": "Abnormality created successfully",
-
-
-
-
-
-
 
             "abnormality_id": abnormality_id,
 
-
-
-
-
-
-
             "name": abnormality.name,
-
-
-
-
-
-
 
             "description": abnormality.description,
 
-
-
-
-
-
-
             "status": abnormality.status
-
-
-
-
-
-
 
         }
 
-
-
-
-
-
-
     except Exception as e:
-
-
-
-
-
-
 
         connection.rollback()
 
-
-
-
-
-
-
         raise HTTPException(
-
-
-
-
-
-
 
             status_code=400,
 
-
-
-
-
-
-
             detail=str(e)
-
-
-
-
-
-
 
         )
 
-
-
-
-
-
-
     finally:
-
-
-
-
-
-
 
         connection.close()
 
 
-
-
-
-
-
 # --------------------------------------------------
-
-
-
-
-
 
 
 # Get All Abnormalities
 
 
-
-
-
-
-
 # --------------------------------------------------
-
-
-
-
-
 
 
 @app.get("/api/abnormalities")
 
 
-
-
-
-
-
 def get_abnormalities():
-
-
-
-
-
-
 
     connection = get_connection()
 
-
-
-
-
-
-
     cursor = connection.cursor()
-
-
-
-
-
-
 
     cursor.execute(
 
-
-
-
-
-
-
         """
-
-
-
-
-
-
 
         SELECT *
 
-
-
-
-
-
-
         FROM abnormalities
-
-
-
-
-
-
 
         ORDER BY id ASC
 
-
-
-
-
-
-
         """
-
-
-
-
-
-
 
     )
 
-
-
-
-
-
-
     rows = cursor.fetchall()
-
-
-
-
-
-
 
     connection.close()
 
-
-
-
-
-
-
     return {
-
-
-
-
-
-
 
         "count": len(rows),
 
-
-
-
-
-
-
         "abnormalities": [dict(row) for row in rows]
-
-
-
-
-
-
 
     }
 
 
-
-
-
-
-
 # --------------------------------------------------
-
-
-
-
-
 
 
 # Get One Abnormality
 
 
-
-
-
-
-
 # --------------------------------------------------
-
-
-
-
-
 
 
 @app.get("/api/abnormalities/{abnormality_id}")
 
 
-
-
-
-
-
 def get_abnormality(abnormality_id: int):
-
-
-
-
-
-
 
     connection = get_connection()
 
-
-
-
-
-
-
     cursor = connection.cursor()
-
-
-
-
-
-
 
     cursor.execute(
 
-
-
-
-
-
-
         """
-
-
-
-
-
-
 
         SELECT *
 
-
-
-
-
-
-
         FROM abnormalities
-
-
-
-
-
-
 
         WHERE id = ?
 
-
-
-
-
-
-
         """,
-
-
-
-
-
-
 
         (abnormality_id,)
 
-
-
-
-
-
-
     )
-
-
-
-
-
-
 
     row = cursor.fetchone()
 
-
-
-
-
-
-
     connection.close()
-
-
-
-
-
-
 
     if row is None:
 
-
-
-
-
-
-
         raise HTTPException(
-
-
-
-
-
-
 
             status_code=404,
 
-
-
-
-
-
-
             detail="Abnormality not found"
 
-
-
-
-
-
-
         )
-
-
-
-
-
-
 
     return dict(row)
 
 
-
-
-
-
-
 # ==================================================
-
-
-
-
-
 
 
 # BASIC ENDPOINTS
 
 
-
-
-
-
-
 # ==================================================
-
-
-
-
-
 
 
 @app.get("/")
 
 
-
-
-
-
-
 def root():
-
-
-
-
-
-
 
     return {
 
-
-
-
-
-
-
         "message": "AI Medical Imaging Triage & XAI",
-
-
-
-
-
-
 
         "status": "running"
 
-
-
-
-
-
-
     }
-
-
-
-
-
 
 
 @app.get("/health")
 
 
-
-
-
-
-
 def health():
-
-
-
-
-
-
 
     return {
 
-
-
-
-
-
-
         "status": "healthy"
-
-
-
-
-
-
 
     }
 
 
+# ==================================================
+# AUTHENTICATION
+# ==================================================
+
+@app.post("/api/auth/login")
+def login_user(login: LoginRequest):
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    try:
+        # Find the user by User ID
+        cursor.execute(
+            """
+            SELECT
+                id,
+                full_name,
+                username,
+                email,
+                password_hash,
+                role,
+                account_status
+            FROM users
+            WHERE username = ?
+            """,
+            (login.username,)
+        )
+
+        user = cursor.fetchone()
+
+        # Do not reveal whether the User ID exists
+        if user is None:
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid User ID or password"
+            )
+
+        # Check whether the account is active
+        if user["account_status"] != "ACTIVE":
+            raise HTTPException(
+                status_code=403,
+                detail="This account is not active"
+            )
+
+        # Verify the password against the stored hash
+        if not verify_password(
+            login.password,
+            user["password_hash"]
+        ):
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid User ID or password"
+            )
+
+        # Create JWT access token after successful password verification
+        access_token = create_access_token(
+            user_id=user["id"],
+            username=user["username"],
+            role=user["role"]
+        )
+
+        # Successful login
+        return {
+            "message": "Login successful",
+            "access_token": access_token,
+            "token_type": "bearer",
+            "expires_in_minutes": ACCESS_TOKEN_EXPIRE_MINUTES,
+            "user": {
+                "id": user["id"],
+                "full_name": user["full_name"],
+                "username": user["username"],
+                "email": user["email"],
+                "role": user["role"]
+            }
+        }
+
+    finally:
+        connection.close()
 
 
-
+@app.get("/api/auth/me")
+def get_logged_in_user(
+    current_user: dict = Depends(get_current_user)
+):
+    return {
+        "authenticated": True,
+        "user": {
+            "id": current_user["id"],
+            "full_name": current_user["full_name"],
+            "username": current_user["username"],
+            "email": current_user["email"],
+            "role": current_user["role"]
+        }
+    }
 
 
 # ==================================================
+# ADMIN USER MANAGEMENT
+# ==================================================
+
+@app.post("/api/admin/users")
+def create_user_by_admin(
+    user_data: AdminUserCreate,
+    current_admin: dict = Depends(require_admin)
+):
+    allowed_roles = ["Radiologist", "Technician"]
+
+    if user_data.role not in allowed_roles:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "Invalid role",
+                "allowed_roles": allowed_roles
+            }
+        )
+
+    if not user_data.full_name.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Full Name cannot be empty"
+        )
+
+    if not user_data.username.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="User ID cannot be empty"
+        )
+
+    if not user_data.email.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Email cannot be empty"
+        )
+
+    if len(user_data.password) < 8:
+        raise HTTPException(
+            status_code=400,
+            detail="Password must contain at least 8 characters"
+        )
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    try:
+        cursor.execute(
+            """
+            SELECT id
+            FROM users
+            WHERE username = ?
+            """,
+            (user_data.username.strip(),)
+        )
+
+        if cursor.fetchone():
+            raise HTTPException(
+                status_code=409,
+                detail="User ID already exists"
+            )
+
+        cursor.execute(
+            """
+            SELECT id
+            FROM users
+            WHERE email = ?
+            """,
+            (user_data.email.strip(),)
+        )
+
+        if cursor.fetchone():
+            raise HTTPException(
+                status_code=409,
+                detail="Email already exists"
+            )
+
+        password_hash = hash_password(user_data.password)
+
+        cursor.execute(
+            """
+            INSERT INTO users (
+                full_name,
+                username,
+                email,
+                password_hash,
+                role,
+                account_status,
+                email_verified,
+                failed_login_attempts
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                user_data.full_name.strip(),
+                user_data.username.strip(),
+                user_data.email.strip(),
+                password_hash,
+                user_data.role,
+                "ACTIVE",
+                1,
+                0
+            )
+        )
+
+        new_user_id = cursor.lastrowid
+        connection.commit()
+
+        return {
+            "message": "User created successfully",
+            "created_by": {
+                "username": current_admin["username"],
+                "role": current_admin["role"]
+            },
+            "user": {
+                "id": new_user_id,
+                "full_name": user_data.full_name.strip(),
+                "username": user_data.username.strip(),
+                "email": user_data.email.strip(),
+                "role": user_data.role,
+                "account_status": "ACTIVE"
+            }
+        }
+
+    except HTTPException:
+        connection.rollback()
+        raise
+
+    except Exception as e:
+        connection.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to create user: {str(e)}"
+        )
+
+    finally:
+        connection.close()
+
+# ==================================================
+# ADMIN USER LIST
+# ==================================================
+
+@app.get("/api/admin/users")
+def get_admin_users(
+    current_admin: dict = Depends(require_admin)
+):
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    try:
+        cursor.execute(
+            """
+            SELECT
+                id,
+                full_name,
+                username,
+                email,
+                role,
+                account_status,
+                email_verified,
+                created_at,
+                updated_at
+            FROM users
+            ORDER BY id DESC
+            """
+        )
+
+        users = [dict(row) for row in cursor.fetchall()]
+
+        return {
+            "count": len(users),
+            "users": users
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to load users: {str(e)}"
+        )
+
+    finally:
+        connection.close()
 
 
-
-
-
+# ==================================================
+# ==================================================
 
 
 # PATIENT MANAGEMENT
 
 
-
-
-
-
-
 # ==================================================
 
 
-
-
-
-
-
 # --------------------------------------------------
-
-
-
-
-
 
 
 # Create Patient
 
 
-
-
-
-
-
 # --------------------------------------------------
-
-
-
-
-
 
 
 @app.post("/api/patients")
 
 
-
-
-
-
-
 def create_patient(patient: PatientCreate):
-
-
-
-
-
-
 
     connection = get_connection()
 
-
-
-
-
-
-
     cursor = connection.cursor()
-
-
-
-
-
-
 
     try:
 
-
-
-
-
-
-
         cursor.execute(
-
-
-
-
-
-
 
             """
 
-
-
-
-
-
-
             INSERT INTO patients (
-
-
-
-
-
-
 
                 patient_id,
 
-
-
-
-
-
-
                 name,
-
-
-
-
-
-
 
                 age,
 
-
-
-
-
-
-
                 gender
 
-
-
-
-
-
-
             )
-
-
-
-
-
-
 
             VALUES (?, ?, ?, ?)
 
-
-
-
-
-
-
             """,
-
-
-
-
-
-
 
             (
 
-
-
-
-
-
-
                 patient.patient_id,
-
-
-
-
-
-
 
                 patient.name,
 
-
-
-
-
-
-
                 patient.age,
-
-
-
-
-
-
 
                 patient.gender
 
-
-
-
-
-
-
             )
 
-
-
-
-
-
-
         )
-
-
-
-
-
-
 
         connection.commit()
 
-
-
-
-
-
-
         return {
-
-
-
-
-
-
 
             "message": "Patient created successfully",
 
-
-
-
-
-
-
             "patient_id": patient.patient_id
-
-
-
-
-
-
 
         }
 
-
-
-
-
-
-
     except Exception as e:
-
-
-
-
-
-
 
         connection.rollback()
 
-
-
-
-
-
-
         raise HTTPException(
-
-
-
-
-
-
 
             status_code=400,
 
-
-
-
-
-
-
             detail=str(e)
-
-
-
-
-
-
 
         )
 
-
-
-
-
-
-
     finally:
-
-
-
-
-
-
 
         connection.close()
 
 
-
-
-
-
-
 # --------------------------------------------------
-
-
-
-
-
 
 
 # Get All Patients
 
 
-
-
-
-
-
 # --------------------------------------------------
-
-
-
-
-
 
 
 @app.get("/api/patients")
 
 
-
-
-
-
-
 def get_patients():
-
-
-
-
-
-
 
     connection = get_connection()
 
-
-
-
-
-
-
     cursor = connection.cursor()
-
-
-
-
-
-
 
     cursor.execute(
 
-
-
-
-
-
-
         """
-
-
-
-
-
-
 
         SELECT *
 
-
-
-
-
-
-
         FROM patients
-
-
-
-
-
-
 
         ORDER BY id DESC
 
-
-
-
-
-
-
         """
-
-
-
-
-
-
 
     )
 
-
-
-
-
-
-
     rows = cursor.fetchall()
-
-
-
-
-
-
 
     connection.close()
 
-
-
-
-
-
-
     return {
-
-
-
-
-
-
 
         "count": len(rows),
 
-
-
-
-
-
-
         "patients": [dict(row) for row in rows]
-
-
-
-
-
-
 
     }
 
 
-
-
-
-
-
 # --------------------------------------------------
-
-
-
-
-
 
 
 # Get One Patient
 
 
-
-
-
-
-
 # --------------------------------------------------
-
-
-
-
-
 
 
 @app.get("/api/patients/{patient_id}")
 
 
-
-
-
-
-
 def get_patient(patient_id: int):
-
-
-
-
-
-
 
     connection = get_connection()
 
-
-
-
-
-
-
     cursor = connection.cursor()
-
-
-
-
-
-
 
     cursor.execute(
 
-
-
-
-
-
-
         """
-
-
-
-
-
-
 
         SELECT *
 
-
-
-
-
-
-
         FROM patients
-
-
-
-
-
-
 
         WHERE id = ?
 
-
-
-
-
-
-
         """,
-
-
-
-
-
-
 
         (patient_id,)
 
-
-
-
-
-
-
     )
-
-
-
-
-
-
 
     row = cursor.fetchone()
 
-
-
-
-
-
-
     connection.close()
-
-
-
-
-
-
 
     if row is None:
 
-
-
-
-
-
-
         raise HTTPException(
-
-
-
-
-
-
 
             status_code=404,
 
-
-
-
-
-
-
             detail="Patient not found"
 
-
-
-
-
-
-
         )
-
-
-
-
-
-
 
     return dict(row)
 
 
-
-
-
-
-
 # ==================================================
-
-
-
-
-
 
 
 # STUDY MANAGEMENT
 
 
-
-
-
-
-
 # ==================================================
 
 
-
-
-
-
-
 # --------------------------------------------------
-
-
-
-
-
 
 
 # Create Study
 
 
-
-
-
-
-
 # --------------------------------------------------
-
-
-
-
-
 
 
 @app.post("/api/studies")
 
 
-
-
-
-
-
 def create_study(study: StudyCreate):
-
-
-
-
-
-
 
     connection = get_connection()
 
-
-
-
-
-
-
     cursor = connection.cursor()
-
-
-
-
-
-
 
     try:
 
-
-
-
-
-
-
         # Check whether patient exists
-
-
-
-
-
-
 
         cursor.execute(
 
-
-
-
-
-
-
             """
-
-
-
-
-
-
 
             SELECT id
 
-
-
-
-
-
-
             FROM patients
-
-
-
-
-
-
 
             WHERE id = ?
 
-
-
-
-
-
-
             """,
-
-
-
-
-
-
 
             (study.patient_id,)
 
-
-
-
-
-
-
         )
-
-
-
-
-
-
 
         patient = cursor.fetchone()
 
-
-
-
-
-
-
         if patient is None:
-
-
-
-
-
-
 
             raise HTTPException(
 
-
-
-
-
-
-
                 status_code=404,
-
-
-
-
-
-
 
                 detail="Patient not found"
 
-
-
-
-
-
-
             )
-
-
-
-
-
-
 
         # Create study
 
-
-
-
-
-
-
         cursor.execute(
-
-
-
-
-
-
 
             """
 
-
-
-
-
-
-
             INSERT INTO studies (
-
-
-
-
-
-
 
                 patient_id,
 
-
-
-
-
-
-
                 study_type,
-
-
-
-
-
-
 
                 study_date
 
-
-
-
-
-
-
             )
-
-
-
-
-
-
 
             VALUES (?, ?, ?)
 
-
-
-
-
-
-
             """,
-
-
-
-
-
-
 
             (
 
-
-
-
-
-
-
                 study.patient_id,
-
-
-
-
-
-
 
                 study.study_type,
 
-
-
-
-
-
-
                 study.study_date
-
-
-
-
-
-
 
             )
 
-
-
-
-
-
-
         )
-
-
-
-
-
-
 
         connection.commit()
 
-
-
-
-
-
-
         study_id = cursor.lastrowid
-
-
-
-
-
-
 
         return {
 
-
-
-
-
-
-
             "message": "Study created successfully",
-
-
-
-
-
-
 
             "study_id": study_id,
 
-
-
-
-
-
-
             "patient_id": study.patient_id,
-
-
-
-
-
-
 
             "study_type": study.study_type,
 
-
-
-
-
-
-
             "study_date": study.study_date
-
-
-
-
-
-
 
         }
 
-
-
-
-
-
-
     except HTTPException:
 
-
-
-
-
-
-
         connection.rollback()
-
-
-
-
-
-
 
         raise
 
-
-
-
-
-
-
     except Exception as e:
-
-
-
-
-
-
 
         connection.rollback()
 
-
-
-
-
-
-
         raise HTTPException(
-
-
-
-
-
-
 
             status_code=400,
 
-
-
-
-
-
-
             detail=str(e)
-
-
-
-
-
-
 
         )
 
-
-
-
-
-
-
     finally:
-
-
-
-
-
-
 
         connection.close()
 
 
-
-
-
-
-
 # --------------------------------------------------
-
-
-
-
-
 
 
 # Get All Studies
 
 
-
-
-
-
-
 # --------------------------------------------------
-
-
-
-
-
 
 
 @app.get("/api/studies")
 
 
-
-
-
-
-
 def get_studies():
-
-
-
-
-
-
 
     connection = get_connection()
 
-
-
-
-
-
-
     cursor = connection.cursor()
-
-
-
-
-
-
 
     cursor.execute(
 
-
-
-
-
-
-
         """
-
-
-
-
-
-
 
         SELECT
 
-
-
-
-
-
-
             studies.id,
-
-
-
-
-
-
 
             studies.patient_id,
 
-
-
-
-
-
-
             patients.patient_id AS patient_code,
-
-
-
-
-
-
 
             patients.name AS patient_name,
 
-
-
-
-
-
-
             studies.study_type,
-
-
-
-
-
-
 
             studies.study_date,
 
-
-
-
-
-
-
             studies.created_at
-
-
-
-
-
-
 
         FROM studies
 
-
-
-
-
-
-
         JOIN patients
-
-
-
-
-
-
 
             ON studies.patient_id = patients.id
 
-
-
-
-
-
-
         ORDER BY studies.id DESC
-
-
-
-
-
-
 
         """
 
-
-
-
-
-
-
     )
-
-
-
-
-
-
 
     rows = cursor.fetchall()
 
-
-
-
-
-
-
     connection.close()
-
-
-
-
-
-
 
     return {
 
-
-
-
-
-
-
         "count": len(rows),
 
-
-
-
-
-
-
         "studies": [dict(row) for row in rows]
-
-
-
-
-
-
 
     }
 
 
-
-
-
-
-
 # ==================================================
-
-
-
-
-
 
 
 # DATABASE IMAGE RECORDS
 
 
-
-
-
-
-
 # IMPORTANT:
-
-
-
-
-
 
 
 # This route must come BEFORE /api/studies/{study_id}
 
 
-
-
-
-
-
 # ==================================================
-
-
-
-
-
 
 
 @app.get("/api/studies/database")
 
 
-
-
-
-
-
 def get_database_images():
-
-
-
-
-
-
 
     connection = get_connection()
 
-
-
-
-
-
-
     cursor = connection.cursor()
-
-
-
-
-
-
 
     cursor.execute(
 
-
-
-
-
-
-
         """
-
-
-
-
-
-
 
         SELECT *
 
-
-
-
-
-
-
         FROM medical_images
-
-
-
-
-
-
 
         ORDER BY id DESC
 
-
-
-
-
-
-
         """
-
-
-
-
-
-
 
     )
 
-
-
-
-
-
-
     rows = cursor.fetchall()
-
-
-
-
-
-
 
     connection.close()
 
-
-
-
-
-
-
     return {
-
-
-
-
-
-
 
         "count": len(rows),
 
-
-
-
-
-
-
         "images": [dict(row) for row in rows]
-
-
-
-
-
-
 
     }
 
 
-
-
-
-
-
 # --------------------------------------------------
-
-
-
-
-
 
 
 # Get One Study
 
 
-
-
-
-
-
 # --------------------------------------------------
-
-
-
-
-
 
 
 @app.get("/api/studies/{study_id}")
 
 
-
-
-
-
-
 def get_study(study_id: int):
-
-
-
-
-
-
 
     connection = get_connection()
 
-
-
-
-
-
-
     cursor = connection.cursor()
-
-
-
-
-
-
 
     cursor.execute(
 
-
-
-
-
-
-
         """
-
-
-
-
-
-
 
         SELECT
 
-
-
-
-
-
-
             studies.id,
-
-
-
-
-
-
 
             studies.patient_id,
 
-
-
-
-
-
-
             patients.patient_id AS patient_code,
-
-
-
-
-
-
 
             patients.name AS patient_name,
 
-
-
-
-
-
-
             patients.age,
-
-
-
-
-
-
 
             patients.gender,
 
-
-
-
-
-
-
             studies.study_type,
-
-
-
-
-
-
 
             studies.study_date,
 
-
-
-
-
-
-
             studies.created_at
-
-
-
-
-
-
 
         FROM studies
 
-
-
-
-
-
-
         JOIN patients
-
-
-
-
-
-
 
             ON studies.patient_id = patients.id
 
-
-
-
-
-
-
         WHERE studies.id = ?
-
-
-
-
-
-
 
         """,
 
-
-
-
-
-
-
         (study_id,)
-
-
-
-
-
-
 
     )
 
-
-
-
-
-
-
     row = cursor.fetchone()
-
-
-
-
-
-
 
     connection.close()
 
-
-
-
-
-
-
     if row is None:
-
-
-
-
-
-
 
         raise HTTPException(
 
-
-
-
-
-
-
             status_code=404,
-
-
-
-
-
-
 
             detail="Study not found"
 
-
-
-
-
-
-
         )
-
-
-
-
-
-
 
     return dict(row)
 
 
-
-
-
-
-
 # ==================================================
-
-
-
-
-
 
 
 # MEDICAL IMAGE UPLOAD
 
 
-
-
-
-
-
 # ==================================================
-
-
-
-
-
 
 
 @app.post("/api/studies/upload")
 
 
-
-
-
-
-
 async def upload_study(
 
-
-
-
-
-
-
     file: UploadFile = File(...),
-
-
-
-
-
-
 
     study_id: int | None = None
 
 
-
-
-
-
-
 ):
-
-
-
-
-
-
 
     # Check file extension
 
-
-
-
-
-
-
     extension = Path(file.filename).suffix.lower()
-
-
-
-
-
-
 
     if extension not in ALLOWED_EXTENSIONS:
 
-
-
-
-
-
-
         raise HTTPException(
 
-
-
-
-
-
-
             status_code=400,
-
-
-
-
-
-
 
             detail="Unsupported file type"
 
-
-
-
-
-
-
         )
-
-
-
-
-
-
 
     connection = get_connection()
 
-
-
-
-
-
-
     cursor = connection.cursor()
-
-
-
-
-
-
 
     try:
 
-
-
-
-
-
-
         # --------------------------------------------------
-
-
-
-
-
-
 
         # Check whether study exists
 
-
-
-
-
-
-
         # --------------------------------------------------
-
-
-
-
-
-
 
         if study_id is not None:
 
-
-
-
-
-
-
             cursor.execute(
-
-
-
-
-
-
 
                 """
 
-
-
-
-
-
-
                 SELECT id
-
-
-
-
-
-
 
                 FROM studies
 
-
-
-
-
-
-
                 WHERE id = ?
-
-
-
-
-
-
 
                 """,
 
-
-
-
-
-
-
                 (study_id,)
 
-
-
-
-
-
-
             )
-
-
-
-
-
-
 
             study = cursor.fetchone()
 
-
-
-
-
-
-
             if study is None:
-
-
-
-
-
-
 
                 raise HTTPException(
 
-
-
-
-
-
-
                     status_code=404,
-
-
-
-
-
-
 
                     detail="Study not found"
 
-
-
-
-
-
-
                 )
 
-
-
-
-
-
-
         # --------------------------------------------------
-
-
-
-
-
-
 
         # Create unique file ID
 
-
-
-
-
-
-
         # --------------------------------------------------
-
-
-
-
-
-
 
         file_id = str(uuid.uuid4())
 
-
-
-
-
-
-
         saved_filename = f"{file_id}{extension}"
-
-
-
-
-
-
 
         file_path = UPLOAD_DIR / saved_filename
 
-
-
-
-
-
-
         # --------------------------------------------------
-
-
-
-
-
-
 
         # Save uploaded file
 
-
-
-
-
-
-
         # --------------------------------------------------
-
-
-
-
-
-
 
         with file_path.open("wb") as buffer:
 
-
-
-
-
-
-
             shutil.copyfileobj(
-
-
-
-
-
-
 
                 file.file,
 
-
-
-
-
-
-
                 buffer
-
-
-
-
-
-
 
             )
 
-
-
-
-
-
-
         # --------------------------------------------------
-
-
-
-
-
-
 
         # Save image information in SQLite
 
-
-
-
-
-
-
         # --------------------------------------------------
-
-
-
-
-
-
 
         cursor.execute(
 
-
-
-
-
-
-
             """
-
-
-
-
-
-
 
             INSERT INTO medical_images (
 
-
-
-
-
-
-
                 study_id,
 
-
-
-
-
-
-
                 file_id,
-
-
-
-
-
-
 
                 original_filename,
 
-
-
-
-
-
-
                 stored_filename,
-
-
-
-
-
-
 
                 file_path,
 
-
-
-
-
-
-
                 file_type,
-
-
-
-
-
-
 
                 validation_status
 
-
-
-
-
-
-
             )
-
-
-
-
-
-
 
             VALUES (?, ?, ?, ?, ?, ?, ?)
 
-
-
-
-
-
-
             """,
-
-
-
-
-
-
 
             (
 
-
-
-
-
-
-
                 study_id,
-
-
-
-
-
-
 
                 file_id,
 
-
-
-
-
-
-
                 file.filename,
-
-
-
-
-
-
 
                 saved_filename,
 
-
-
-
-
-
-
                 str(file_path),
-
-
-
-
-
-
 
                 extension,
 
-
-
-
-
-
-
                 "Pending"
-
-
-
-
-
-
 
             )
 
-
-
-
-
-
-
         )
-
-
-
-
-
-
 
         connection.commit()
 
-
-
-
-
-
-
         return {
-
-
-
-
-
-
 
             "message": "File uploaded successfully",
 
-
-
-
-
-
-
             "file_id": file_id,
-
-
-
-
-
-
 
             "study_id": study_id,
 
-
-
-
-
-
-
             "filename": file.filename,
-
-
-
-
-
-
 
             "saved_as": saved_filename
 
-
-
-
-
-
-
         }
-
-
-
-
-
-
 
     except HTTPException:
 
-
-
-
-
-
-
         connection.rollback()
-
-
-
-
-
-
 
         raise
 
-
-
-
-
-
-
     except Exception as e:
-
-
-
-
-
-
 
         connection.rollback()
 
-
-
-
-
-
-
         raise HTTPException(
-
-
-
-
-
-
 
             status_code=400,
 
-
-
-
-
-
-
             detail=str(e)
-
-
-
-
-
-
 
         )
 
-
-
-
-
-
-
     finally:
-
-
-
-
-
-
 
         connection.close()
 
 
-
-
-
-
-
 # ==================================================
-
-
-
-
-
 
 
 # IMAGE VALIDATION
 
 
-
-
-
-
-
 # ==================================================
-
-
-
-
-
 
 
 @app.post("/api/studies/{file_id}/validate")
 
 
-
-
-
-
-
 def validate_image(file_id: str):
-
-
-
-
-
-
 
     connection = get_connection()
 
-
-
-
-
-
-
     cursor = connection.cursor()
-
-
-
-
-
-
 
     # Find image in database
 
-
-
-
-
-
-
     cursor.execute(
-
-
-
-
-
-
 
         """
 
-
-
-
-
-
-
         SELECT *
-
-
-
-
-
-
 
         FROM medical_images
 
-
-
-
-
-
-
         WHERE file_id = ?
-
-
-
-
-
-
 
         """,
 
-
-
-
-
-
-
         (file_id,)
-
-
-
-
-
-
 
     )
 
-
-
-
-
-
-
     image_record = cursor.fetchone()
-
-
-
-
-
-
 
     if not image_record:
 
-
-
-
-
-
-
         connection.close()
-
-
-
-
-
-
 
         raise HTTPException(
 
-
-
-
-
-
-
             status_code=404,
-
-
-
-
-
-
 
             detail="Image not found"
 
-
-
-
-
-
-
         )
-
-
-
-
-
-
 
     file_path = image_record["file_path"]
 
-
-
-
-
-
-
     # Check that file exists
-
-
-
-
-
-
 
     if not Path(file_path).exists():
 
-
-
-
-
-
-
         cursor.execute(
-
-
-
-
-
-
 
             """
 
-
-
-
-
-
-
             UPDATE medical_images
-
-
-
-
-
-
 
             SET validation_status = ?
 
-
-
-
-
-
-
             WHERE file_id = ?
-
-
-
-
-
-
 
             """,
 
-
-
-
-
-
-
             ("Invalid", file_id)
-
-
-
-
-
-
 
         )
 
-
-
-
-
-
-
         connection.commit()
 
-
-
-
-
-
-
         connection.close()
-
-
-
-
-
-
 
         raise HTTPException(
 
-
-
-
-
-
-
             status_code=404,
-
-
-
-
-
-
 
             detail="Image file not found"
 
-
-
-
-
-
-
         )
-
-
-
-
-
-
 
     # Try to open and validate the image
 
-
-
-
-
-
-
     try:
-
-
-
-
-
-
 
         image = Image.open(file_path)
 
-
-
-
-
-
-
         width, height = image.size
-
-
-
-
-
-
 
         image_format = image.format
 
-
-
-
-
-
-
         mode = image.mode
-
-
-
-
-
-
 
         # Successful validation
 
-
-
-
-
-
-
         cursor.execute(
-
-
-
-
-
-
 
             """
 
-
-
-
-
-
-
             UPDATE medical_images
-
-
-
-
-
-
 
             SET validation_status = ?
 
-
-
-
-
-
-
             WHERE file_id = ?
 
-
-
-
-
-
-
             """,
-
-
-
-
-
-
 
             ("Valid", file_id)
 
-
-
-
-
-
-
         )
-
-
-
-
-
-
 
         connection.commit()
 
-
-
-
-
-
-
         connection.close()
-
-
-
-
-
-
 
         return {
 
-
-
-
-
-
-
             "file_id": file_id,
-
-
-
-
-
-
 
             "valid": True,
 
-
-
-
-
-
-
             "validation_status": "Valid",
-
-
-
-
-
-
 
             "width": width,
 
-
-
-
-
-
-
             "height": height,
-
-
-
-
-
-
 
             "format": image_format,
 
-
-
-
-
-
-
             "mode": mode
 
-
-
-
-
-
-
         }
-
-
-
-
-
-
 
     except Exception as error:
 
-
-
-
-
-
-
         # Failed validation
-
-
-
-
-
-
 
         cursor.execute(
 
-
-
-
-
-
-
             """
-
-
-
-
-
-
 
             UPDATE medical_images
 
-
-
-
-
-
-
             SET validation_status = ?
-
-
-
-
-
-
 
             WHERE file_id = ?
 
-
-
-
-
-
-
             """,
-
-
-
-
-
-
 
             ("Invalid", file_id)
 
-
-
-
-
-
-
         )
-
-
-
-
-
-
 
         connection.commit()
 
-
-
-
-
-
-
         connection.close()
-
-
-
-
-
-
 
         return {
 
-
-
-
-
-
-
             "file_id": file_id,
-
-
-
-
-
-
 
             "valid": False,
 
-
-
-
-
-
-
             "validation_status": "Invalid",
 
-
-
-
-
-
-
             "message": str(error)
-
-
-
-
-
-
 
         }
 
 
-
-
-
-
-
 # ==================================================
-
-
-
-
-
 
 
 # IMAGE PREPROCESSING
 
 
-
-
-
-
-
 # ==================================================
-
-
-
-
-
 
 
 @app.post("/api/studies/{file_id}/preprocess")
 
 
-
-
-
-
-
 async def preprocess_image(file_id: str):
-
-
-
-
-
-
 
     matching_files = list(
 
-
-
-
-
-
-
         UPLOAD_DIR.glob(f"{file_id}.*")
-
-
-
-
-
-
 
     )
 
-
-
-
-
-
-
     if not matching_files:
 
-
-
-
-
-
-
         raise HTTPException(
-
-
-
-
-
-
 
             status_code=404,
 
-
-
-
-
-
-
             detail="Uploaded file not found"
 
-
-
-
-
-
-
         )
-
-
-
-
-
-
 
     file_path = matching_files[0]
 
-
-
-
-
-
-
     try:
-
-
-
-
-
-
 
         with Image.open(file_path) as image:
 
-
-
-
-
-
-
             # Convert image to RGB
-
-
-
-
-
-
 
             image = image.convert("RGB")
 
-
-
-
-
-
-
             # Resize image
-
-
-
-
-
-
 
             image = image.resize(
 
-
-
-
-
-
-
                 (224, 224)
 
-
-
-
-
-
-
             )
-
-
-
-
-
-
 
             # Convert image to NumPy array
 
-
-
-
-
-
-
             image_array = np.array(image)
-
-
-
-
-
-
 
             # Normalize pixels
 
-
-
-
-
-
-
             normalized = (
-
-
-
-
-
-
 
                 image_array.astype(np.float32)
 
-
-
-
-
-
-
                 / 255.0
 
-
-
-
-
-
-
             )
-
-
-
-
-
-
 
         # Update preprocessing status in SQLite
 
-
-
-
-
-
-
         connection = get_connection()
-
-
-
-
-
-
 
         cursor = connection.cursor()
 
-
-
-
-
-
-
         cursor.execute(
-
-
-
-
-
-
 
             """
 
-
-
-
-
-
-
             UPDATE medical_images
-
-
-
-
-
-
 
             SET preprocessing_status = ?
 
-
-
-
-
-
-
             WHERE file_id = ?
-
-
-
-
-
-
 
             """,
 
-
-
-
-
-
-
             ("Preprocessed", file_id)
 
-
-
-
-
-
-
         )
-
-
-
-
-
-
 
         connection.commit()
 
-
-
-
-
-
-
         connection.close()
-
-
-
-
-
-
 
         return {
 
-
-
-
-
-
-
             "file_id": file_id,
-
-
-
-
-
-
 
             "preprocessed": True,
 
-
-
-
-
-
-
             "preprocessing_status": "Preprocessed",
-
-
-
-
-
-
 
             "size": [224, 224],
 
-
-
-
-
-
-
             "channels": 3,
-
-
-
-
-
-
 
             "min_pixel_value": float(
 
-
-
-
-
-
-
                 normalized.min()
-
-
-
-
-
-
 
             ),
 
-
-
-
-
-
-
             "max_pixel_value": float(
-
-
-
-
-
-
 
                 normalized.max()
 
-
-
-
-
-
-
             )
-
-
-
-
-
-
 
         }
 
-
-
-
-
-
-
     except Exception as e:
-
-
-
-
-
-
 
         raise HTTPException(
 
-
-
-
-
-
-
             status_code=400,
-
-
-
-
-
-
 
             detail=f"Preprocessing failed: {str(e)}"
 
+        )
+# ============================================================
+# CT DICOM SERIES UPLOAD
+# ============================================================
+
+CT_UPLOAD_DIR = UPLOAD_DIR / "ct"
+
+CT_UPLOAD_DIR.mkdir(
+    parents=True,
+    exist_ok=True
+)
 
 
+@app.post("/api/ct/upload-series")
+async def upload_ct_series(
+    files: list[UploadFile] = File(...),
+    study_id: int | None = None
+):
+    """
+    Upload a complete CT DICOM series.
 
+    A CT scan normally contains multiple DICOM slices.
+    This endpoint stores all uploaded .dcm files together
+    inside one unique CT series folder.
 
+    This endpoint only uploads the CT series.
+    CT preprocessing and AI prediction are separate steps.
+    """
 
-
+    if not files:
+        raise HTTPException(
+            status_code=400,
+            detail="No CT DICOM files were uploaded"
         )
 
+    # --------------------------------------------------
+    # Check study if study_id was supplied
+    # --------------------------------------------------
 
+    connection = get_connection()
+    cursor = connection.cursor()
 
+    try:
 
+        if study_id is not None:
 
+            cursor.execute(
+                """
+                SELECT id
+                FROM studies
+                WHERE id = ?
+                """,
+                (study_id,)
+            )
 
+            study = cursor.fetchone()
 
+            if study is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Study not found"
+                )
+
+        # --------------------------------------------------
+        # Create unique CT series ID
+        # --------------------------------------------------
+
+        series_id = str(uuid.uuid4())
+
+        series_dir = CT_UPLOAD_DIR / series_id
+
+        series_dir.mkdir(
+            parents=True,
+            exist_ok=True
+        )
+
+        saved_files = []
+
+        # --------------------------------------------------
+        # Save every DICOM slice
+        # --------------------------------------------------
+
+        for index, file in enumerate(files):
+
+            original_filename = (
+                file.filename
+                or f"slice_{index + 1}.dcm"
+            )
+
+            extension = Path(
+                original_filename
+            ).suffix.lower()
+
+            if extension != ".dcm":
+
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "CT series can contain only "
+                        ".dcm DICOM files. "
+                        f"Invalid file: {original_filename}"
+                    )
+                )
+
+            # Prevent unsafe folder names.
+            # We save using our own filename.
+            saved_filename = (
+                f"slice_{index + 1:04d}.dcm"
+            )
+
+            file_path = (
+                series_dir
+                / saved_filename
+            )
+
+            with file_path.open("wb") as buffer:
+
+                shutil.copyfileobj(
+                    file.file,
+                    buffer
+                )
+
+            saved_files.append(
+                {
+                    "original_filename":
+                        original_filename,
+
+                    "saved_filename":
+                        saved_filename,
+
+                    "file_path":
+                        str(file_path)
+                }
+            )
+
+        # --------------------------------------------------
+        # Commit database transaction
+        # --------------------------------------------------
+
+        connection.commit()
+
+        return {
+            "success": True,
+
+            "message":
+                "CT DICOM series uploaded successfully",
+
+            "series_id":
+                series_id,
+
+            "study_id":
+                study_id,
+
+            "slice_count":
+                len(saved_files),
+
+            "series_directory":
+                str(series_dir),
+
+            "files":
+                saved_files,
+
+            "next_step":
+                "CT preprocessing"
+        }
+
+    except HTTPException:
+
+        connection.rollback()
+
+        # Remove partially uploaded series
+        if 'series_dir' in locals() and series_dir.exists():
+
+            shutil.rmtree(
+                series_dir,
+                ignore_errors=True
+            )
+
+        raise
+
+    except Exception as e:
+
+        connection.rollback()
+
+        # Remove partially uploaded series
+        if 'series_dir' in locals() and series_dir.exists():
+
+            shutil.rmtree(
+                series_dir,
+                ignore_errors=True
+            )
+
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "CT series upload failed: "
+                f"{str(e)}"
+            )
+        )
+
+    finally:
+
+        connection.close()
+# ============================================================
+# CT PREPROCESSING
+# ============================================================
+
+@app.post("/api/ct/preprocess/{series_id}")
+async def preprocess_ct_series(series_id: str):
+    """
+    Preprocess an uploaded CT DICOM series.
+
+    Steps:
+    1. Load DICOM series
+    2. Resample to 1 mm isotropic spacing
+    3. Convert to Hounsfield Units
+    4. Clip HU to [-1000, 400]
+    5. Normalize to [0, 1]
+
+    This endpoint prepares the CT volume for the
+    later candidate-generation and AI-analysis stages.
+    """
+
+    series_dir = CT_UPLOAD_DIR / series_id
+
+    if not series_dir.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="CT series not found"
+        )
+
+    try:
+
+        # --------------------------------------------------
+        # 1. Find DICOM files
+        # --------------------------------------------------
+
+        dicom_files = sorted(
+            series_dir.glob("*.dcm")
+        )
+
+        if not dicom_files:
+            raise HTTPException(
+                status_code=400,
+                detail="No DICOM files found in CT series"
+            )
+
+        # --------------------------------------------------
+        # 2. Load DICOM series
+        # --------------------------------------------------
+
+        reader = sitk.ImageSeriesReader()
+
+        series_file_names = (
+            reader.GetGDCMSeriesFileNames(
+                str(series_dir)
+            )
+        )
+
+        if not series_file_names:
+
+            # Fallback to the files saved by our uploader
+            series_file_names = [
+                str(path)
+                for path in dicom_files
+            ]
+
+        reader.SetFileNames(
+            series_file_names
+        )
+
+        ct_image = reader.Execute()
+
+        original_size = list(
+            ct_image.GetSize()
+        )
+
+        original_spacing = list(
+            ct_image.GetSpacing()
+        )
+
+        # --------------------------------------------------
+        # 3. Resample to 1 mm isotropic spacing
+        # --------------------------------------------------
+
+        target_spacing = (
+            1.0,
+            1.0,
+            1.0
+        )
+
+        original_spacing_array = np.array(
+            ct_image.GetSpacing(),
+            dtype=np.float32
+        )
+
+        original_size_array = np.array(
+            ct_image.GetSize(),
+            dtype=np.float32
+        )
+
+        new_size = np.round(
+            original_size_array
+            * original_spacing_array
+            / np.array(
+                target_spacing,
+                dtype=np.float32
+            )
+        ).astype(int)
+
+        new_size = [
+            int(value)
+            for value in new_size
+        ]
+
+        resampler = sitk.ResampleImageFilter()
+
+        resampler.SetOutputSpacing(
+            target_spacing
+        )
+
+        resampler.SetSize(
+            new_size
+        )
+
+        resampler.SetOutputDirection(
+            ct_image.GetDirection()
+        )
+
+        resampler.SetOutputOrigin(
+            ct_image.GetOrigin()
+        )
+
+        resampler.SetTransform(
+            sitk.Transform(),
+        )
+
+        resampler.SetInterpolator(
+            sitk.sitkLinear
+        )
+
+        resampler.SetDefaultPixelValue(
+            -1000
+        )
+
+        resampled_image = (
+            resampler.Execute(ct_image)
+        )
+
+        # --------------------------------------------------
+        # 4. Convert to NumPy
+        # --------------------------------------------------
+
+        volume_hu = sitk.GetArrayFromImage(
+            resampled_image
+        ).astype(
+            np.float32
+        )
+
+        # --------------------------------------------------
+        # 5. Clip Hounsfield Units
+        # --------------------------------------------------
+
+        volume_hu = np.clip(
+            volume_hu,
+            -1000.0,
+            400.0
+        )
+
+        # --------------------------------------------------
+        # 6. Normalize to [0, 1]
+        # --------------------------------------------------
+
+        volume_normalized = (
+            volume_hu + 1000.0
+        ) / 1400.0
+
+        volume_normalized = (
+            volume_normalized.astype(
+                np.float32
+            )
+        )
+
+        # --------------------------------------------------
+        # 7. Create preprocessing directory
+        # --------------------------------------------------
+
+        processed_dir = (
+            series_dir / "processed"
+        )
+
+        processed_dir.mkdir(
+            parents=True,
+            exist_ok=True
+        )
+
+        volume_path = (
+            processed_dir
+            / "ct_volume.npy"
+        )
+
+        np.save(
+            volume_path,
+            volume_normalized
+        )
+
+        metadata = {
+            "series_id": series_id,
+            "slice_count": len(dicom_files),
+
+            "original_size": original_size,
+            "original_spacing": original_spacing,
+
+            "resampled_size": list(
+                resampled_image.GetSize()
+            ),
+
+            "resampled_spacing": list(
+                resampled_image.GetSpacing()
+            ),
+
+            "volume_shape": list(
+                volume_normalized.shape
+            ),
+
+            "hu_clip_min": -1000.0,
+            "hu_clip_max": 400.0,
+
+            "normalized_min": float(
+                volume_normalized.min()
+            ),
+
+            "normalized_max": float(
+                volume_normalized.max()
+            ),
+
+            "volume_path": str(
+                volume_path
+            )
+        }
+
+        metadata_path = (
+            processed_dir
+            / "metadata.json"
+        )
+
+        with metadata_path.open(
+            "w",
+            encoding="utf-8"
+        ) as metadata_file:
+
+            json.dump(
+                metadata,
+                metadata_file,
+                indent=2
+            )
+
+        return {
+            "success": True,
+
+            "message":
+                "CT preprocessing completed successfully",
+
+            "series_id":
+                series_id,
+
+            "original": {
+                "size": original_size,
+                "spacing": original_spacing
+            },
+
+            "processed": {
+                "size": list(
+                    resampled_image.GetSize()
+                ),
+                "spacing": list(
+                    resampled_image.GetSpacing()
+                ),
+                "volume_shape": list(
+                    volume_normalized.shape
+                )
+            },
+
+            "normalization": {
+                "hu_min": -1000,
+                "hu_max": 400,
+                "min": float(
+                    volume_normalized.min()
+                ),
+                "max": float(
+                    volume_normalized.max()
+                )
+            },
+
+            "volume_file":
+                str(volume_path),
+
+            "next_step":
+                "CT candidate generation and AI analysis"
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "CT preprocessing failed: "
+                f"{str(e)}"
+            )
+        )
 # ==================================================
-
-
-
-
-
 
 
 # AI MODEL MANAGEMENT
 
 
-
-
-
-
-
 # ==================================================
-
-
-
-
-
 
 
 @app.post("/api/models")
 
 
-
-
-
-
-
 def create_ai_model(model: AIModelCreate):
-
-
-
-
-
-
 
     connection = get_connection()
 
-
-
-
-
-
-
     cursor = connection.cursor()
-
-
-
-
-
-
 
     try:
 
-
-
-
-
-
-
         cursor.execute(
 
-
-
-
-
-
-
             """
-
-
-
-
-
-
 
             SELECT id
 
-
-
-
-
-
-
             FROM ai_models
-
-
-
-
-
-
 
             WHERE model_name = ? AND version = ?
 
-
-
-
-
-
-
             """,
-
-
-
-
-
-
 
             (model.model_name, model.version)
 
-
-
-
-
-
-
         )
-
-
-
-
-
-
 
         existing_model = cursor.fetchone()
 
-
-
-
-
-
-
         if existing_model is not None:
-
-
-
-
-
-
 
             raise HTTPException(
 
-
-
-
-
-
-
                 status_code=409,
-
-
-
-
-
-
 
                 detail="A model with the same name and version already exists"
 
-
-
-
-
-
-
             )
-
-
-
-
-
-
 
         cursor.execute(
 
-
-
-
-
-
-
             """
-
-
-
-
-
-
 
             INSERT INTO ai_models (
 
-
-
-
-
-
-
                 model_name,
-
-
-
-
-
-
 
                 version,
 
-
-
-
-
-
-
                 model_path,
-
-
-
-
-
-
 
                 status
 
-
-
-
-
-
-
             )
-
-
-
-
-
-
 
             VALUES (?, ?, ?, ?)
 
-
-
-
-
-
-
             """,
-
-
-
-
-
-
 
             (
 
-
-
-
-
-
-
                 model.model_name,
-
-
-
-
-
-
 
                 model.version,
 
-
-
-
-
-
-
                 model.model_path,
-
-
-
-
-
-
 
                 model.status
 
-
-
-
-
-
-
             )
 
-
-
-
-
-
-
         )
-
-
-
-
-
-
 
         connection.commit()
 
-
-
-
-
-
-
         model_id = cursor.lastrowid
-
-
-
-
-
-
 
         return {
 
-
-
-
-
-
-
             "message": "AI model registered successfully",
-
-
-
-
-
-
 
             "model_id": model_id,
 
-
-
-
-
-
-
             "model_name": model.model_name,
-
-
-
-
-
-
 
             "version": model.version,
 
-
-
-
-
-
-
             "model_path": model.model_path,
-
-
-
-
-
-
 
             "status": model.status
 
-
-
-
-
-
-
         }
-
-
-
-
-
-
 
     except HTTPException:
 
-
-
-
-
-
-
         connection.rollback()
-
-
-
-
-
-
 
         raise
 
-
-
-
-
-
-
     except Exception as e:
-
-
-
-
-
-
 
         connection.rollback()
 
-
-
-
-
-
-
         raise HTTPException(
-
-
-
-
-
-
 
             status_code=400,
 
-
-
-
-
-
-
             detail=str(e)
-
-
-
-
-
-
 
         )
 
-
-
-
-
-
-
     finally:
 
-
-
-
-
-
-
         connection.close()
-
-
-
-
-
 
 
 @app.get("/api/models")
 
 
-
-
-
-
-
 def get_ai_models():
-
-
-
-
-
-
 
     connection = get_connection()
 
-
-
-
-
-
-
     cursor = connection.cursor()
-
-
-
-
-
-
 
     try:
 
-
-
-
-
-
-
         cursor.execute(
 
-
-
-
-
-
-
             """
-
-
-
-
-
-
 
             SELECT
 
-
-
-
-
-
-
                 id,
-
-
-
-
-
-
 
                 model_name,
 
-
-
-
-
-
-
                 version,
-
-
-
-
-
-
 
                 model_path,
 
-
-
-
-
-
-
                 status,
-
-
-
-
-
-
 
                 created_at
 
-
-
-
-
-
-
             FROM ai_models
-
-
-
-
-
-
 
             ORDER BY id DESC
 
-
-
-
-
-
-
             """
-
-
-
-
-
-
 
         )
 
-
-
-
-
-
-
         rows = cursor.fetchall()
-
-
-
-
-
-
 
         return {
 
-
-
-
-
-
-
             "count": len(rows),
-
-
-
-
-
-
 
             "models": [dict(row) for row in rows]
 
-
-
-
-
-
-
         }
-
-
-
-
-
-
 
     finally:
 
-
-
-
-
-
-
         connection.close()
-
-
-
-
-
 
 
 @app.get("/api/models/{model_id}")
 
 
-
-
-
-
-
 def get_ai_model(model_id: int):
-
-
-
-
-
-
 
     connection = get_connection()
 
-
-
-
-
-
-
     cursor = connection.cursor()
-
-
-
-
-
-
 
     try:
 
-
-
-
-
-
-
         cursor.execute(
-
-
-
-
-
-
 
             """
 
-
-
-
-
-
-
             SELECT
-
-
-
-
-
-
 
                 id,
 
-
-
-
-
-
-
                 model_name,
-
-
-
-
-
-
 
                 version,
 
-
-
-
-
-
-
                 model_path,
-
-
-
-
-
-
 
                 status,
 
-
-
-
-
-
-
                 created_at
-
-
-
-
-
-
 
             FROM ai_models
 
-
-
-
-
-
-
             WHERE id = ?
-
-
-
-
-
-
 
             """,
 
-
-
-
-
-
-
             (model_id,)
-
-
-
-
-
-
 
         )
 
-
-
-
-
-
-
         row = cursor.fetchone()
-
-
-
-
-
-
 
         if row is None:
 
-
-
-
-
-
-
             raise HTTPException(
-
-
-
-
-
-
 
                 status_code=404,
 
-
-
-
-
-
-
                 detail="AI model not found"
-
-
-
-
-
-
 
             )
 
-
-
-
-
-
-
         return dict(row)
 
-
-
-
-
-
-
     finally:
-
-
-
-
-
-
 
         connection.close()
 
 
-
-
-
-
-
 # ==================================================
-
-
-
-
-
 
 
 # AI ANALYSIS / PREDICTION STRUCTURE
 
 
-
-
-
-
-
 # ==================================================
-
-
-
-
-
 
 
 #
 
 
-
-
-
-
-
 # IMPORTANT:
-
-
-
-
-
 
 
 # This endpoint prepares the backend for the real AI model.
 
 
-
-
-
-
-
 # It does NOT create or invent a medical prediction.
-
-
-
-
-
 
 
 # The trained model will be connected in a later step.
 
 
-
-
-
-
-
 # ==================================================
-
-
-
-
-
 
 
 @app.post("/api/analysis/{study_id}")
 
 def run_ai_analysis(study_id: int):
 
-
-
     connection = get_connection()
 
     cursor = connection.cursor()
-
-
 
     try:
 
@@ -11002,8 +4417,6 @@ def run_ai_analysis(study_id: int):
         # Check whether the study exists
 
         # --------------------------------------------------
-
-
 
         cursor.execute(
 
@@ -11021,11 +4434,7 @@ def run_ai_analysis(study_id: int):
 
         )
 
-
-
         study = cursor.fetchone()
-
-
 
         if study is None:
 
@@ -11037,15 +4446,11 @@ def run_ai_analysis(study_id: int):
 
             )
 
-
-
         # --------------------------------------------------
 
         # Find the most recently uploaded image
 
         # --------------------------------------------------
-
-
 
         cursor.execute(
 
@@ -11079,11 +4484,7 @@ def run_ai_analysis(study_id: int):
 
         )
 
-
-
         image_record = cursor.fetchone()
-
-
 
         if image_record is None:
 
@@ -11095,15 +4496,11 @@ def run_ai_analysis(study_id: int):
 
             )
 
-
-
         # --------------------------------------------------
 
         # Validation must be successful
 
         # --------------------------------------------------
-
-
 
         if image_record["validation_status"] != "Valid":
 
@@ -11115,15 +4512,11 @@ def run_ai_analysis(study_id: int):
 
             )
 
-
-
         # --------------------------------------------------
 
         # Preprocessing must be successful
 
         # --------------------------------------------------
-
-
 
         if image_record["preprocessing_status"] != "Preprocessed":
 
@@ -11135,19 +4528,13 @@ def run_ai_analysis(study_id: int):
 
             )
 
-
-
         # --------------------------------------------------
 
         # Check that the image file still exists
 
         # --------------------------------------------------
 
-
-
         image_path = Path(image_record["file_path"])
-
-
 
         if not image_path.exists():
 
@@ -11159,19 +4546,13 @@ def run_ai_analysis(study_id: int):
 
             )
 
-
-
         # --------------------------------------------------
 
         # Run the trained ResNet18 model
 
         # --------------------------------------------------
 
-
-
         predictions = predict_image(str(image_path))
-
-
 
         # --------------------------------------------------
 
@@ -11179,15 +4560,11 @@ def run_ai_analysis(study_id: int):
 
         # --------------------------------------------------
 
-
-
         model_name = "ResNet18 Medical 3-Class"
 
         model_version = "1.0"
 
         model_path = "backend/models/resnet18_medical_3class_best.pth"
-
-
 
         cursor.execute(
 
@@ -11217,19 +4594,13 @@ def run_ai_analysis(study_id: int):
 
         )
 
-
-
         model_record = cursor.fetchone()
-
-
 
         # Register the trained model automatically if it
 
         # has not already been registered.
 
         if model_record is None:
-
-
 
             cursor.execute(
 
@@ -11265,17 +4636,11 @@ def run_ai_analysis(study_id: int):
 
             )
 
-
-
             model_id = cursor.lastrowid
-
-
 
         else:
 
             model_id = model_record["id"]
-
-
 
         # --------------------------------------------------
 
@@ -11283,15 +4648,9 @@ def run_ai_analysis(study_id: int):
 
         # --------------------------------------------------
 
-
-
         stored_predictions = []
 
-
-
         for prediction in predictions:
-
-
 
             cursor.execute(
 
@@ -11331,11 +4690,7 @@ def run_ai_analysis(study_id: int):
 
             )
 
-
-
             prediction_id = cursor.lastrowid
-
-
 
             stored_predictions.append(
 
@@ -11354,8 +4709,6 @@ def run_ai_analysis(study_id: int):
                 }
 
             )
-
-
 
         # --------------------------------------------------
         # AUTOMATIC TRIAGE CALCULATION
@@ -11391,8 +4744,6 @@ def run_ai_analysis(study_id: int):
 
         # --------------------------------------------------
 
-
-
         return {
 
             "study_id": study_id,
@@ -11425,21 +4776,15 @@ def run_ai_analysis(study_id: int):
 
         }
 
-
-
     except HTTPException:
 
         connection.rollback()
 
         raise
 
-
-
     except Exception as e:
 
         connection.rollback()
-
-
 
         raise HTTPException(
 
@@ -11449,1210 +4794,493 @@ def run_ai_analysis(study_id: int):
 
         )
 
-
-
     finally:
 
         connection.close()
-
-
-
 
 
 @app.get("/api/analysis/{study_id}")
 
 
-
-
-
-
-
 def get_ai_analysis(study_id: int):
-
-
-
-
-
-
 
     connection = get_connection()
 
-
-
-
-
-
-
     cursor = connection.cursor()
-
-
-
-
-
-
 
     try:
 
-
-
-
-
-
-
         # --------------------------------------------------
-
-
-
-
-
-
 
         # Check whether the study exists
 
-
-
-
-
-
-
         # --------------------------------------------------
-
-
-
-
-
-
 
         cursor.execute(
 
-
-
-
-
-
-
             """
-
-
-
-
-
-
 
             SELECT id
 
-
-
-
-
-
-
             FROM studies
-
-
-
-
-
-
 
             WHERE id = ?
 
-
-
-
-
-
-
             """,
-
-
-
-
-
-
 
             (study_id,)
 
-
-
-
-
-
-
         )
-
-
-
-
-
-
 
         study = cursor.fetchone()
 
-
-
-
-
-
-
         if study is None:
-
-
-
-
-
-
 
             raise HTTPException(
 
-
-
-
-
-
-
                 status_code=404,
-
-
-
-
-
-
 
                 detail="Study not found"
 
-
-
-
-
-
-
             )
 
-
-
-
-
-
-
         # --------------------------------------------------
-
-
-
-
-
-
 
         # Retrieve stored predictions
 
-
-
-
-
-
-
         # --------------------------------------------------
-
-
-
-
-
-
 
         cursor.execute(
 
-
-
-
-
-
-
             """
-
-
-
-
-
-
 
             SELECT
 
-
-
-
-
-
-
                 ai_predictions.id,
-
-
-
-
-
-
 
                 ai_predictions.study_id,
 
-
-
-
-
-
-
                 ai_predictions.model_id,
-
-
-
-
-
-
 
                 ai_models.model_name,
 
-
-
-
-
-
-
                 ai_models.version AS model_version,
-
-
-
-
-
-
 
                 ai_predictions.abnormality,
 
-
-
-
-
-
-
                 ai_predictions.confidence_score,
-
-
-
-
-
-
 
                 ai_predictions.prediction_status,
 
-
-
-
-
-
-
                 ai_predictions.created_at
-
-
-
-
-
-
 
             FROM ai_predictions
 
-
-
-
-
-
-
             LEFT JOIN ai_models
-
-
-
-
-
-
 
                 ON ai_predictions.model_id = ai_models.id
 
-
-
-
-
-
-
             WHERE ai_predictions.study_id = ?
-
-
-
-
-
-
 
             ORDER BY ai_predictions.id DESC
 
-
-
-
-
-
-
             """,
-
-
-
-
-
-
 
             (study_id,)
 
-
-
-
-
-
-
         )
-
-
-
-
-
-
 
         rows = cursor.fetchall()
 
-
-
-
-
-
-
         return {
-
-
-
-
-
-
 
             "study_id": study_id,
 
-
-
-
-
-
-
             "count": len(rows),
-
-
-
-
-
-
 
             "predictions": [dict(row) for row in rows]
 
-
-
-
-
-
-
         }
 
-
-
-
-
-
-
     finally:
-
-
-
-
-
-
 
         connection.close()
 
 
-
-
-
-
-
 # ==================================================
-
-
-
-
-
 
 
 # AI PREDICTION RECORD MANAGEMENT
 
 
-
-
-
-
-
 # ==================================================
-
-
-
-
-
 
 
 #
 
 
-
-
-
-
-
 # IMPORTANT:
-
-
-
-
-
 
 
 # This endpoint stores a prediction produced by the real AI model.
 
 
-
-
-
-
-
 # It must NOT be used to invent or manually create medical predictions.
-
-
-
-
-
 
 
 # The real model integration will call this logic in a later step.
 
 
-
-
-
-
-
 # ==================================================
-
-
-
-
-
 
 
 @app.post("/api/analysis/{study_id}/predictions")
 
 
-
-
-
-
-
 def store_ai_prediction(
 
-
-
-
-
-
-
     study_id: int,
-
-
-
-
-
-
 
     prediction: AIPredictionCreate
 
 
-
-
-
-
-
 ):
-
-
-
-
-
-
 
     if prediction.confidence_score < 0 or prediction.confidence_score > 1:
 
-
-
-
-
-
-
         raise HTTPException(
 
-
-
-
-
-
-
             status_code=400,
-
-
-
-
-
-
 
             detail="confidence_score must be between 0 and 1"
 
-
-
-
-
-
-
         )
-
-
-
-
-
-
 
     connection = get_connection()
 
-
-
-
-
-
-
     cursor = connection.cursor()
-
-
-
-
-
-
 
     try:
 
-
-
-
-
-
-
         # Check that the study exists
-
-
-
-
-
-
 
         cursor.execute(
 
-
-
-
-
-
-
             """
-
-
-
-
-
-
 
             SELECT id
 
-
-
-
-
-
-
             FROM studies
-
-
-
-
-
-
 
             WHERE id = ?
 
-
-
-
-
-
-
             """,
-
-
-
-
-
-
 
             (study_id,)
 
-
-
-
-
-
-
         )
-
-
-
-
-
-
 
         study = cursor.fetchone()
 
-
-
-
-
-
-
         if study is None:
-
-
-
-
-
-
 
             raise HTTPException(
 
-
-
-
-
-
-
                 status_code=404,
-
-
-
-
-
-
 
                 detail="Study not found"
 
-
-
-
-
-
-
             )
-
-
-
-
-
-
 
         # Check that the referenced model exists
 
-
-
-
-
-
-
         cursor.execute(
 
-
-
-
-
-
-
             """
-
-
-
-
-
-
 
             SELECT id, model_name, version
 
-
-
-
-
-
-
             FROM ai_models
-
-
-
-
-
-
 
             WHERE id = ?
 
-
-
-
-
-
-
             """,
-
-
-
-
-
-
 
             (prediction.model_id,)
 
-
-
-
-
-
-
         )
-
-
-
-
-
-
 
         model = cursor.fetchone()
 
-
-
-
-
-
-
         if model is None:
-
-
-
-
-
-
 
             raise HTTPException(
 
-
-
-
-
-
-
                 status_code=404,
-
-
-
-
-
-
 
                 detail="AI model not found"
 
-
-
-
-
-
-
             )
-
-
-
-
-
-
 
         # Store the prediction produced by the model
 
-
-
-
-
-
-
         cursor.execute(
-
-
-
-
-
-
 
             """
 
-
-
-
-
-
-
             INSERT INTO ai_predictions (
 
-
-
-
-
-
-
                 study_id,
-
-
-
-
-
-
 
                 model_id,
 
-
-
-
-
-
-
                 abnormality,
-
-
-
-
-
-
 
                 confidence_score,
 
-
-
-
-
-
-
                 prediction_status
 
-
-
-
-
-
-
             )
-
-
-
-
-
-
 
             VALUES (?, ?, ?, ?, ?)
 
-
-
-
-
-
-
             """,
-
-
-
-
-
-
 
             (
 
-
-
-
-
-
-
                 study_id,
-
-
-
-
-
-
 
                 prediction.model_id,
 
-
-
-
-
-
-
                 prediction.abnormality,
-
-
-
-
-
-
 
                 prediction.confidence_score,
 
-
-
-
-
-
-
                 prediction.prediction_status
-
-
-
-
-
-
 
             )
 
-
-
-
-
-
-
         )
-
-
-
-
-
-
 
         connection.commit()
 
-
-
-
-
-
-
         prediction_id = cursor.lastrowid
-
-
-
-
-
-
 
         return {
 
-
-
-
-
-
-
             "message": "AI prediction stored successfully",
-
-
-
-
-
-
 
             "prediction_id": prediction_id,
 
-
-
-
-
-
-
             "study_id": study_id,
-
-
-
-
-
-
 
             "model_id": prediction.model_id,
 
-
-
-
-
-
-
             "model_name": model["model_name"],
-
-
-
-
-
-
 
             "model_version": model["version"],
 
-
-
-
-
-
-
             "abnormality": prediction.abnormality,
-
-
-
-
-
-
 
             "confidence_score": prediction.confidence_score,
 
-
-
-
-
-
-
             "prediction_status": prediction.prediction_status
-
-
-
-
-
-
 
         }
 
-
-
-
-
-
-
     except HTTPException:
 
-
-
-
-
-
-
         connection.rollback()
-
-
-
-
-
-
 
         raise
 
-
-
-
-
-
-
     except Exception as e:
-
-
-
-
-
-
 
         connection.rollback()
 
-
-
-
-
-
-
         raise HTTPException(
-
-
-
-
-
-
 
             status_code=400,
 
-
-
-
-
-
-
             detail=str(e)
-
-
-
-
-
-
 
         )
 
-
-
-
-
-
-
     finally:
-
-
-
-
-
-
 
         connection.close()
 
+# ============================================================
+# CT LUNG NODULE PREDICTION
+# ============================================================
 
+@app.post("/api/ct/predict-patch")
+async def predict_ct_patch(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Run the trained CT lung-nodule classifier on a
+    preprocessed 32 x 32 x 32 NumPy patch.
 
+    Expected input:
+        .npy file
+        shape = (32, 32, 32)
+        values normalized to approximately [0, 1]
 
+    This endpoint classifies a candidate patch.
+    It does NOT automatically detect nodules in an
+    entire CT scan.
+    """
 
+    filename = file.filename or ""
 
+    if not filename.lower().endswith(".npy"):
+        raise HTTPException(
+            status_code=400,
+            detail="CT patch must be a .npy file"
+        )
 
+    try:
 
+        # ----------------------------------------------------
+        # Read uploaded NumPy file
+        # ----------------------------------------------------
 
+        file_bytes = await file.read()
 
+        import io
 
+        patch = np.load(
+            io.BytesIO(file_bytes)
+        )
+
+        patch = patch.astype(
+            np.float32
+        )
+
+        # ----------------------------------------------------
+        # Validate shape
+        # ----------------------------------------------------
+
+        if patch.shape != (32, 32, 32):
+
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message": (
+                        "Invalid CT patch shape. "
+                        "Expected (32, 32, 32)."
+                    ),
+                    "received_shape": list(
+                        patch.shape
+                    )
+                }
+            )
+
+        # ----------------------------------------------------
+        # Validate values
+        # ----------------------------------------------------
+
+        if not np.isfinite(patch).all():
+
+            raise HTTPException(
+                status_code=400,
+                detail="CT patch contains invalid numerical values"
+            )
+
+        # ----------------------------------------------------
+        # Prepare model input
+        # ----------------------------------------------------
+
+        model_input = torch.from_numpy(
+            patch
+        )
+
+        # batch dimension + channel dimension
+        model_input = model_input.unsqueeze(0)
+        model_input = model_input.unsqueeze(0)
+
+        # ----------------------------------------------------
+        # Run model
+        # ----------------------------------------------------
+
+        with torch.no_grad():
+
+            output = ct_model(
+                model_input
+            )
+
+            probabilities = torch.softmax(
+                output,
+                dim=1
+            )
+
+        probability_non_nodule = float(
+            probabilities[0, 0].item()
+        )
+
+        probability_nodule = float(
+            probabilities[0, 1].item()
+        )
+
+        # ----------------------------------------------------
+        # Apply configured threshold
+        # ----------------------------------------------------
+
+        prediction = (
+            1
+            if probability_nodule >= CT_NODULE_THRESHOLD
+            else 0
+        )
+
+        classification = (
+            "Nodule candidate"
+            if prediction == 1
+            else "Non-nodule candidate"
+        )
+
+        # ----------------------------------------------------
+        # Return result
+        # ----------------------------------------------------
+
+        return {
+            "success": True,
+
+            "model": {
+                "name": "Lung Nodule 3D CNN",
+                "version": "friend-trained-model"
+            },
+
+            "input": {
+                "shape": list(patch.shape),
+                "type": "preprocessed CT patch"
+            },
+
+            "prediction": {
+                "class_id": prediction,
+                "class": classification,
+                "probability_nodule": probability_nodule,
+                "probability_non_nodule": (
+                    probability_non_nodule
+                ),
+                "threshold": CT_NODULE_THRESHOLD
+            },
+
+            "clinical_note": (
+                "AI research output only. "
+                "This model classifies a candidate CT patch "
+                "and does not establish a medical diagnosis."
+            )
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"CT prediction failed: {str(e)}"
+        )
 

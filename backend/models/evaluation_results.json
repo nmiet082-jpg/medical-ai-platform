@@ -1,0 +1,47 @@
+{
+    "model": "ResNet18",
+    "num_classes": 3,
+    "classes": [
+        "Pneumonia",
+        "Cardiomegaly",
+        "Pneumothorax"
+    ],
+    "test_loss": 0.623478175542606,
+    "roc_auc": {
+        "Pneumonia": 0.6196,
+        "Cardiomegaly": 0.692,
+        "Pneumothorax": 0.718
+    },
+    "best_thresholds": {
+        "Pneumonia": 0.3,
+        "Cardiomegaly": 0.3,
+        "Pneumothorax": 0.2
+    },
+    "metrics": {
+        "Pneumonia": {
+            "precision": 0.38,
+            "recall": 0.63,
+            "f1": 0.47,
+            "sensitivity": 0.6264,
+            "specificity": 0.5766
+        },
+        "Cardiomegaly": {
+            "precision": 0.4,
+            "recall": 0.91,
+            "f1": 0.56,
+            "sensitivity": 0.9109,
+            "specificity": 0.3585
+        },
+        "Pneumothorax": {
+            "precision": 0.48,
+            "recall": 0.83,
+            "f1": 0.61,
+            "sensitivity": 0.8306,
+            "specificity": 0.4127
+        }
+    },
+    "overall": {
+        "macro_f1": 0.55,
+        "weighted_f1": 0.55
+    }
+}

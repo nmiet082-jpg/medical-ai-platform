@@ -1,0 +1,8 @@
+Metric,Value
+Accuracy,0.9233
+Precision,0.8468
+Recall / Sensitivity,0.9400
+Specificity,0.9150
+F1 Score,0.8910
+ROC-AUC,0.9860
+Classification Threshold,0.2000

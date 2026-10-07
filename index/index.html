@@ -31,12 +31,7 @@
         body {
             font-family:
                 Arial,
-                Helvetica,
-                sans-serif;
-
-            background: #f4f7fb;
-
-            color: #1e293b;
+                Helvetic            color: #1e293b;
         }
 
 
@@ -926,40 +921,6 @@
                     >
 
                 </div>
-
-
-                <div class="form-group">
-
-                    <label for="role">
-                        Role
-                    </label>
-
-                    <select
-                        id="role"
-                        required
-                    >
-
-                        <option value="">
-                            Select Role
-                        </option>
-
-                        <option value="Admin">
-                            Administrator
-                        </option>
-
-                        <option value="Radiologist">
-                            Radiologist
-                        </option>
-
-                        <option value="Technician">
-                            Technician
-                        </option>
-
-                    </select>
-
-                </div>
-
-
                 <button
                     type="submit"
                     class="login-button"
@@ -971,7 +932,7 @@
 
 
             <p class="login-note">
-                Frontend prototype for academic project.
+                Authorized users only. Your role is assigned by the administrator.
             </p>
 
         </div>
@@ -1529,9 +1490,14 @@
                         <select
                             id="imageStudyType"
                             class="form-control"
+                            onchange="updateStudyTypeUI()"
                         >
                             <option value="Chest X-Ray">
                                 Chest X-Ray
+                            </option>
+
+                            <option value="CT Scan">
+                                CT Scan
                             </option>
                         </select>
 
@@ -1548,6 +1514,7 @@
                             type="date"
                             id="imageStudyDate"
                             class="form-control"
+                            max=""
                         >
 
                     </div>
@@ -1570,12 +1537,11 @@
                     <div class="upload-box">
 
                         <div class="upload-icon">
-                            🖼️
+                            🏥
                         </div>
 
-                        <p>
-                            Supported formats:
-                            DICOM, JPG, JPEG and PNG
+                        <p id="uploadInstruction">
+                            Upload a chest X-ray in DICOM, JPG, JPEG or PNG format.
                         </p>
 
                         <input
@@ -1592,7 +1558,7 @@
                         class="btn btn-primary"
                         onclick="uploadMedicalImage()"
                     >
-                        Create Study & Upload X-Ray
+                        Create Study & Upload
                     </button>
 
                 </div>
@@ -1714,16 +1680,39 @@
 
 
                 <div class="section-card">
-
-                    <h2>
-                        Reports
-                    </h2>
-
-                    <p>
-                        Report generation will be implemented
-                        in the next phase.
+                    <h2>Generate Study Report</h2>
+                    <p style="color:#64748b; margin-bottom:18px;">
+                        Generate a structured report from the selected study's
+                        AI analysis, XAI explanation, triage result, and clinician review.
                     </p>
+                    <div class="result-row">
+                        <span class="result-label">Current Study ID</span>
+                        <span class="result-value" id="reportStudyId">No study selected</span>
+                    </div>
+                    <div id="reportMessage" style="display:none; margin:15px 0; padding:12px; border-radius:8px;"></div>
+                    <button id="generateReportButton" class="btn btn-primary" type="button" onclick="generateStudyReport()">
+                        📄 Generate Final Report
+                    </button>
+                </div>
 
+                <div class="section-card">
+                    <h2>Generated Report</h2>
+                    <div id="generatedReport" style="min-height:80px; white-space:pre-wrap; background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:18px; color:#334155; line-height:1.7;">
+                        No report generated for the current study.
+                    </div>
+                </div>
+
+                <div class="section-card">
+                    <h2>Previous Reports</h2>
+                    <div id="previousReports" style="color:#64748b;">No reports loaded yet.</div>
+                </div>
+
+                <div class="section-card" style="background:#fffbeb; border-color:#fde68a;">
+                    <strong style="color:#92400e;">⚠️ Research Prototype Notice</strong>
+                    <p style="margin-top:8px; color:#92400e; line-height:1.6;">
+                        This report summarizes AI outputs and recorded clinician review information.
+                        It is not an autonomous medical diagnosis and should not replace professional clinical judgment.
+                    </p>
                 </div>
 
             </section>
@@ -1753,15 +1742,111 @@
 
                 <div class="section-card">
 
-                    <h2>
-                        User Management
+                    <h2 style="margin-bottom:6px;">
+                        Create New User
                     </h2>
 
-                    <p>
-                        User management functionality will
-                        be connected to the backend
-                        authentication system in the next phase.
+                    <p style="color:#64748b;">
+                        Only administrators can create Radiologist and Technician accounts.
                     </p>
+
+                    <form onsubmit="createAdminUser(event)" style="margin-top:22px;">
+
+                        <div class="form-grid">
+
+                            <div class="form-group">
+                                <label for="adminFullName">Full Name</label>
+                                <input type="text" id="adminFullName"
+                                       placeholder="Enter full name" required>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="adminUsername">User ID</label>
+                                <input type="text" id="adminUsername"
+                                       placeholder="e.g. neha01" required>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="adminEmail">Email</label>
+                                <input type="email" id="adminEmail"
+                                       placeholder="Enter email address" required>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="adminPassword">Password</label>
+                                <input type="password" id="adminPassword"
+                                       placeholder="Minimum 8 characters"
+                                       minlength="8" required>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="adminRole">Role</label>
+                                <select id="adminRole" required>
+                                    <option value="">Select Role</option>
+                                    <option value="Radiologist">Radiologist</option>
+                                    <option value="Technician">Technician</option>
+                                </select>
+                            </div>
+
+                        </div>
+
+                        <div id="adminUserMessage"
+                             style="display:none; margin:15px 0; padding:12px; border-radius:8px;">
+                        </div>
+
+                        <button type="submit" class="btn btn-primary" id="createUserButton">
+                            Create User
+                        </button>
+
+                        <button type="button" class="btn btn-secondary"
+                                onclick="clearAdminUserForm()">
+                            Clear
+                        </button>
+
+                    </form>
+
+                </div>
+
+                <div class="section-card">
+
+                    <div style="display:flex; justify-content:space-between;
+                                align-items:center; gap:15px; flex-wrap:wrap;">
+
+                        <div>
+                            <h2 style="margin-bottom:6px;">Existing Users</h2>
+                            <p style="color:#64748b;">
+                                User accounts currently registered in the system.
+                            </p>
+                        </div>
+
+                        <button type="button" class="btn btn-secondary"
+                                onclick="loadAdminUsers()">
+                            🔄 Refresh
+                        </button>
+
+                    </div>
+
+                    <div class="table-container" style="margin-top:20px;">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>User ID</th>
+                                    <th>Email</th>
+                                    <th>Role</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="adminUsersTableBody">
+                                <tr>
+                                    <td colspan="5"
+                                        style="text-align:center; padding:30px;">
+                                        Click Refresh to load users.
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
 
                 </div>
 
@@ -1803,82 +1888,69 @@
 
         let currentFileId = null;
 
-        let currentStudyId = null;
+        let currentStudyId = localStorage.getItem("currentStudyId") || null;
 
 
         /* =====================================================
            LOGIN
         ===================================================== */
 
-        function login(event) {
+        async function login(event) {
 
             event.preventDefault();
 
-
             const username =
-                document
-                    .getElementById("username")
-                    .value
-                    .trim();
-
+                document.getElementById("username").value.trim();
 
             const password =
-                document
-                    .getElementById("password")
-                    .value
-                    .trim();
+                document.getElementById("password").value;
 
-
-            const role =
-                document
-                    .getElementById("role")
-                    .value;
-
-
-            if (
-                username === "" ||
-                password === "" ||
-                role === ""
-            ) {
-
-                alert(
-                    "Please fill in all login fields."
-                );
-
+            if (!username || !password) {
+                alert("Please enter your User ID and password.");
                 return;
             }
 
+            try {
 
-            /*
-             * FRONTEND PROTOTYPE
-             *
-             * Any non-empty username/password
-             * is accepted for now.
-             *
-             * Real authentication should be
-             * moved to the FastAPI backend.
-             */
+                const response = await fetch(
+                    API_URL + "/api/auth/login",
+                    {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json"
+                        },
+                        body: JSON.stringify({
+                            username: username,
+                            password: password
+                        })
+                    }
+                );
 
+                const result = await response.json();
 
-            localStorage.setItem(
-                "loggedIn",
-                "true"
-            );
+                if (!response.ok) {
+                    throw new Error(
+                        result.detail || "Login failed."
+                    );
+                }
 
+                // Role comes from the backend; there is no role selector.
+                localStorage.setItem("access_token", result.access_token);
+                localStorage.setItem("loggedIn", "true");
+                localStorage.setItem("username", result.user.full_name);
+                localStorage.setItem("role", result.user.role);
 
-            localStorage.setItem(
-                "username",
-                username
-            );
+                startApplication();
 
+            } catch (error) {
 
-            localStorage.setItem(
-                "role",
-                role
-            );
+                alert(
+                    "Login failed:\n" +
+                    error.message
+                );
 
+            }
 
-            startApplication();
         }
 
 
@@ -1886,89 +1958,76 @@
            START APPLICATION
         ===================================================== */
 
-        function startApplication() {
+        async function startApplication() {
 
-            const loggedIn =
-                localStorage.getItem(
-                    "loggedIn"
-                );
+            const token =
+                localStorage.getItem("access_token");
 
+            if (!token) {
 
-            if (
-                loggedIn !== "true"
-            ) {
-
-                document
-                    .getElementById("loginPage")
-                    .style.display = "flex";
-
-
-                document
-                    .getElementById("app")
-                    .style.display = "none";
-
-
+                document.getElementById("loginPage").style.display = "flex";
+                document.getElementById("app").style.display = "none";
                 return;
+
             }
 
+            try {
 
-            const username =
-                localStorage.getItem(
-                    "username"
+                const response = await fetch(
+                    API_URL + "/api/auth/me",
+                    {
+                        headers: {
+                            "Authorization": "Bearer " + token
+                        }
+                    }
                 );
 
+                const result = await response.json();
 
-            const role =
-                localStorage.getItem(
-                    "role"
+                if (!response.ok) {
+                    throw new Error(
+                        result.detail || "Your session has expired."
+                    );
+                }
+
+                const user = result.user;
+
+                localStorage.setItem("loggedIn", "true");
+                localStorage.setItem("username", user.full_name);
+                localStorage.setItem("role", user.role);
+
+                document.getElementById("loginPage").style.display = "none";
+                document.getElementById("app").style.display = "block";
+
+                document.getElementById("loggedUsername").textContent =
+                    user.full_name;
+                document.getElementById("loggedRole").textContent =
+                    user.role;
+                document.getElementById("welcomeUsername").textContent =
+                    user.full_name;
+                document.getElementById("welcomeRole").textContent =
+                    user.role;
+                document.getElementById("currentRole").textContent =
+                    user.role;
+
+                applyRoleAccess();
+                loadPatientsFromBackend();
+                updateDashboard();
+
+            } catch (error) {
+
+                console.error(
+                    "Authentication check failed:",
+                    error
                 );
 
+                logout();
 
-            document
-                .getElementById("loginPage")
-                .style.display = "none";
+                alert(
+                    "Your login session is invalid or expired. Please log in again."
+                );
 
-
-            document
-                .getElementById("app")
-                .style.display = "block";
-
-
-            document
-                .getElementById("loggedUsername")
-                .textContent =
-                username;
-
-
-            document
-                .getElementById("loggedRole")
-                .textContent =
-                role;
-
-
-            document
-                .getElementById("welcomeUsername")
-                .textContent =
-                username;
-
-
-            document
-                .getElementById("welcomeRole")
-                .textContent =
-                role;
-
-
-            document
-                .getElementById("currentRole")
-                .textContent =
-                role;
-
-
-            applyRoleAccess();
-
-            loadPatientsFromBackend();
-
-            updateDashboard();
+            }
 
         }
 
@@ -1980,30 +2039,42 @@
         function applyRoleAccess() {
 
             const role =
-                localStorage.getItem(
-                    "role"
-                );
-
+                localStorage.getItem("role");
 
             const userManagement =
-                document.getElementById(
-                    "userManagementNav"
-                );
+                document.getElementById("userManagementNav");
+
+            userManagement.style.display =
+                role === "Admin" ? "block" : "none";
+
+        }
 
 
-            if (
-                role === "Admin"
-            ) {
+        /* =====================================================
+           AUTHENTICATED API HELPER
+        ===================================================== */
 
-                userManagement.style.display =
-                    "block";
+        async function apiFetch(endpoint, options = {}) {
 
-            } else {
+            const token =
+                localStorage.getItem("access_token");
 
-                userManagement.style.display =
-                    "none";
+            const headers = {
+                ...(options.headers || {})
+            };
 
+            if (token) {
+                headers.Authorization =
+                    "Bearer " + token;
             }
+
+            return fetch(
+                API_URL + endpoint,
+                {
+                    ...options,
+                    headers: headers
+                }
+            );
 
         }
 
@@ -2089,6 +2160,27 @@
             ) {
 
                 updateDashboard();
+
+            }
+
+            if (
+                pageId === "reportsPage"
+            ) {
+
+                loadReportsPage();
+
+            }
+
+            if (
+                pageId === "usersPage"
+            ) {
+
+                if (localStorage.getItem("role") !== "Admin") {
+                    alert("Only Administrator can access User Management.");
+                    return;
+                }
+
+                loadAdminUsers();
 
             }
 
@@ -3035,6 +3127,56 @@
            FR-03
         ===================================================== */
 
+        function updateStudyTypeUI() {
+
+            const studyType =
+                document.getElementById(
+                    "imageStudyType"
+                ).value;
+
+            const uploadInstruction =
+                document.getElementById(
+                    "uploadInstruction"
+                );
+
+            const fileInput =
+                document.getElementById(
+                    "medicalImage"
+                );
+
+            if (!uploadInstruction || !fileInput) {
+                return;
+            }
+
+            if (studyType === "CT Scan") {
+
+                uploadInstruction.textContent =
+                    "Select the complete CT DICOM folder containing all slices for lung nodule analysis.";
+
+                fileInput.accept = ".dcm";
+
+                // CT scans contain many DICOM slices.
+                // Enable folder selection in supported browsers.
+                fileInput.multiple = true;
+                fileInput.setAttribute("webkitdirectory", "");
+                fileInput.setAttribute("directory", "");
+
+            } else {
+
+                uploadInstruction.textContent =
+                    "Upload a chest X-ray in DICOM, JPG, JPEG or PNG format.";
+
+                fileInput.accept =
+                    ".dcm,.jpg,.jpeg,.png";
+
+                // X-ray uses the existing single-file workflow.
+                fileInput.multiple = false;
+                fileInput.removeAttribute("webkitdirectory");
+                fileInput.removeAttribute("directory");
+            }
+        }
+
+
         async function uploadMedicalImage() {
 
             const patientSelect =
@@ -3079,7 +3221,9 @@
             ) {
 
                 alert(
-                    "Please select a chest X-ray."
+                    studyTypeSelect.value === "CT Scan"
+                        ? "Please select the complete CT DICOM folder."
+                        : "Please select a chest X-ray."
                 );
 
                 return;
@@ -3137,12 +3281,212 @@
                 studyTypeSelect.value ||
                 "Chest X-Ray";
 
+            if (studyType === "CT Scan") {
 
-            const studyDate =
-                studyDateInput.value ||
+                const ctFiles =
+                    Array.from(fileInput.files);
+
+                if (!ctFiles.length) {
+                    alert(
+                        "Please select the complete CT DICOM folder."
+                    );
+                    return;
+                }
+
+                // Every file in the CT series must be a DICOM file.
+                const invalidCtFiles =
+                    ctFiles.filter(function(ctFile) {
+
+                        return !ctFile.name
+                            .toLowerCase()
+                            .endsWith(".dcm");
+                    });
+
+                if (invalidCtFiles.length > 0) {
+                    alert(
+                        "The CT folder contains non-DICOM files. Please select a folder containing only .dcm files."
+                    );
+                    return;
+                }
+
+                const todayString =
+                    new Date()
+                        .toISOString()
+                        .split("T")[0];
+
+                const studyDate =
+                    studyDateInput.value ||
+                    todayString;
+
+                if (studyDate > todayString) {
+                    alert(
+                        "Study Date cannot be in the future. Please select today or an earlier date."
+                    );
+                    return;
+                }
+
+                try {
+
+                    // --------------------------------------------------
+                    // 1. Create the CT study
+                    // --------------------------------------------------
+
+                    const studyResponse =
+                        await fetch(
+                            API_URL +
+                            "/api/studies",
+                            {
+                                method: "POST",
+                                headers: {
+                                    "Content-Type":
+                                        "application/json"
+                                },
+                                body: JSON.stringify({
+                                    patient_id:
+                                        Number(
+                                            patientSelect.value
+                                        ),
+                                    study_type:
+                                        studyType,
+                                    study_date:
+                                        studyDate
+                                })
+                            }
+                        );
+
+                    const studyResult =
+                        await studyResponse.json();
+
+                    if (!studyResponse.ok) {
+                        throw new Error(
+                            studyResult.detail ||
+                            "Could not create the CT study."
+                        );
+                    }
+
+                    currentStudyId =
+                        studyResult.study_id;
+
+                    localStorage.setItem(
+                        "currentStudyId",
+                        String(currentStudyId)
+                    );
+
+                    const studyInfo =
+                        document.getElementById(
+                            "currentStudyInfo"
+                        );
+
+                    studyInfo.style.display =
+                        "block";
+
+                    studyInfo.innerHTML = `
+                        CT study created successfully.
+                        The system assigned Study ID
+                        ${currentStudyId}.
+                    `;
+
+                    // --------------------------------------------------
+                    // 2. Upload all CT DICOM slices
+                    // --------------------------------------------------
+
+                    const formData =
+                        new FormData();
+
+                    ctFiles.forEach(function(ctFile) {
+                        formData.append(
+                            "files",
+                            ctFile,
+                            ctFile.name
+                        );
+                    });
+
+                    const uploadResponse =
+                        await fetch(
+                            API_URL +
+                            "/api/ct/upload-series?study_id=" +
+                            encodeURIComponent(
+                                currentStudyId
+                            ),
+                            {
+                                method: "POST",
+                                body: formData
+                            }
+                        );
+
+                    const uploadResult =
+                        await uploadResponse.json();
+
+                    if (!uploadResponse.ok) {
+                        throw new Error(
+                            uploadResult.detail ||
+                            "CT DICOM-series upload failed."
+                        );
+                    }
+
+                    alert(
+                        "CT DICOM series uploaded successfully. " +
+                        uploadResult.slice_count +
+                        " DICOM slices were received."
+                    );
+
+                    const validationSection =
+                        document.getElementById(
+                            "validationSection"
+                        );
+
+                    if (validationSection) {
+                        validationSection.style.display =
+                            "block";
+                    }
+
+                    const validationResult =
+                        document.getElementById(
+                            "validationResult"
+                        );
+
+                    if (validationResult) {
+                        validationResult.innerHTML = `
+                            <div class="alert alert-success">
+                                <strong>CT DICOM Series Uploaded</strong><br>
+                                Study ID: ${currentStudyId}<br>
+                                DICOM slices received: ${uploadResult.slice_count}<br>
+                                Series ID: ${uploadResult.series_id}
+                            </div>
+                        `;
+                    }
+
+                    // CT preprocessing will be connected in the next step.
+                    return;
+
+                } catch (error) {
+
+                    alert(
+                        "CT upload failed: " +
+                        error.message
+                    );
+
+                    return;
+                }
+            }
+
+
+            const todayString =
                 new Date()
                     .toISOString()
                     .split("T")[0];
+
+            const studyDate =
+                studyDateInput.value ||
+                todayString;
+
+            // A study date cannot be in the future.
+            if (studyDate > todayString) {
+                alert(
+                    "Study Date cannot be in the future. Please select today or an earlier date."
+                );
+                return;
+            }
 
 
             try {
@@ -3201,6 +3545,11 @@
 
                 currentStudyId =
                     studyResult.study_id;
+
+                localStorage.setItem(
+                    "currentStudyId",
+                    String(currentStudyId)
+                );
 
 
                 const studyInfo =
@@ -5045,10 +5394,1262 @@
         }
 
         /* =====================================================
+           REPORTS
+        ===================================================== */
+
+        function showReportMessage(message, isError = false) {
+            const box = document.getElementById("reportMessage");
+            if (!box) return;
+            box.style.display = "block";
+            box.style.background = isError ? "#fef2f2" : "#f0fdf4";
+            box.style.border = isError ? "1px solid #fecaca" : "1px solid #bbf7d0";
+            box.style.color = isError ? "#991b1b" : "#166534";
+            box.textContent = message;
+        }
+
+        function escapeReportText(value) {
+            return String(value ?? "")
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+
+        function showReportMessage(message, isError = false) {
+            const box = document.getElementById("reportMessage");
+
+            if (!box) {
+                return;
+            }
+
+            box.style.display = "block";
+            box.style.background =
+                isError
+                    ? "#fef2f2"
+                    : "#f0fdf4";
+
+            box.style.border =
+                isError
+                    ? "1px solid #fecaca"
+                    : "1px solid #bbf7d0";
+
+            box.style.color =
+                isError
+                    ? "#991b1b"
+                    : "#166534";
+
+            box.textContent = message;
+        }
+
+
+        function escapeReportText(value) {
+            return String(value ?? "")
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+
+
+        /*
+         * The trained X-ray model uses these class-specific
+         * decision thresholds.
+         *
+         * These values are also used as a safe frontend fallback
+         * when the stored GET /analysis response does not contain
+         * the threshold field.
+         */
+        const REPORT_CLASS_THRESHOLDS = {
+            "Pneumonia": 0.30,
+            "Cardiomegaly": 0.30,
+            "Pneumothorax": 0.20
+        };
+
+
+        function getReportThreshold(prediction) {
+            const rawThreshold =
+                Number(
+                    prediction?.threshold
+                );
+
+            if (
+                Number.isFinite(rawThreshold) &&
+                rawThreshold > 0
+            ) {
+                return rawThreshold;
+            }
+
+            const className =
+                String(
+                    prediction?.class_name ||
+                    prediction?.abnormality ||
+                    ""
+                ).trim();
+
+            return (
+                REPORT_CLASS_THRESHOLDS[className] ??
+                null
+            );
+        }
+
+
+        function getReportStudyDate(value) {
+            if (!value) {
+                return "Not available";
+            }
+
+            const dateText =
+                String(value).trim();
+
+            /*
+             * The backend stores the study date as text.
+             * Do not silently change a date entered by the user.
+             * If it is in the future, clearly mark it as invalid.
+             */
+            const isoMatch =
+                /^(\d{4})-(\d{2})-(\d{2})$/.exec(
+                    dateText
+                );
+
+            if (isoMatch) {
+                const today =
+                    new Date()
+                        .toISOString()
+                        .split("T")[0];
+
+                if (dateText > today) {
+                    return (
+                        "Invalid/future date recorded: " +
+                        dateText
+                    );
+                }
+            }
+
+            return dateText;
+        }
+
+
+        function getExplanationFinding(explanation) {
+            if (!explanation) {
+                return null;
+            }
+
+            const directFinding =
+                String(
+                    explanation.finding ||
+                    explanation.abnormality ||
+                    ""
+                ).trim();
+
+            /*
+             * Older explanation records may contain the generic
+             * value "AI finding". Do not display that generic value
+             * when the generated filename identifies the class.
+             */
+            if (
+                directFinding &&
+                directFinding.toLowerCase() !== "ai finding"
+            ) {
+                return directFinding;
+            }
+
+            const path =
+                String(
+                    explanation.explanation_path ||
+                    explanation.path ||
+                    ""
+                );
+
+            /*
+             * Example:
+             * study_29_cardiomegaly_gradcam.png
+             */
+            const pathMatch =
+                /study_\d+_([^\\/]+?)_gradcam(?:\.[a-z0-9]+)?$/i.exec(
+                    path
+                );
+
+            if (pathMatch) {
+                const raw =
+                    pathMatch[1]
+                        .replace(/[_-]+/g, " ")
+                        .trim();
+
+                const knownClasses = [
+                    "Pneumonia",
+                    "Cardiomegaly",
+                    "Pneumothorax"
+                ];
+
+                const matchedClass =
+                    knownClasses.find(
+                        function(className) {
+                            return (
+                                className.toLowerCase() ===
+                                raw.toLowerCase()
+                            );
+                        }
+                    );
+
+                if (matchedClass) {
+                    return matchedClass;
+                }
+
+                return raw
+                    .split(" ")
+                    .map(
+                        function(word) {
+                            return (
+                                word.charAt(0).toUpperCase() +
+                                word.slice(1)
+                            );
+                        }
+                    )
+                    .join(" ");
+            }
+
+            return "AI finding";
+        }
+
+
+        async function loadReportsPage() {
+            const studyEl =
+                document.getElementById(
+                    "reportStudyId"
+                );
+
+            const previous =
+                document.getElementById(
+                    "previousReports"
+                );
+
+            const studyId =
+                currentStudyId ||
+                localStorage.getItem(
+                    "currentStudyId"
+                );
+
+            if (!studyId) {
+                if (studyEl) {
+                    studyEl.textContent =
+                        "No study selected";
+                }
+
+                if (previous) {
+                    previous.innerHTML =
+                        "<p>No current study is selected.</p>";
+                }
+
+                return;
+            }
+
+            currentStudyId =
+                Number(studyId);
+
+            localStorage.setItem(
+                "currentStudyId",
+                String(currentStudyId)
+            );
+
+            if (studyEl) {
+                studyEl.textContent =
+                    currentStudyId;
+            }
+
+            try {
+                const response =
+                    await fetch(
+                        API_URL +
+                        "/api/reports/" +
+                        currentStudyId
+                    );
+
+                const result =
+                    await response.json();
+
+                if (!response.ok) {
+                    if (response.status === 404) {
+                        if (previous) {
+                            previous.innerHTML =
+                                "<p>No reports have been generated for this study yet.</p>";
+                        }
+
+                        return;
+                    }
+
+                    throw new Error(
+                        result.detail ||
+                        "Could not load reports."
+                    );
+                }
+
+                const reports =
+                    Array.isArray(
+                        result.reports
+                    )
+                        ? result.reports
+                        : [];
+
+                if (!reports.length) {
+                    if (previous) {
+                        previous.innerHTML =
+                            "<p>No reports have been generated for this study yet.</p>";
+                    }
+
+                    return;
+                }
+
+                if (previous) {
+                    previous.innerHTML =
+                        reports
+                            .map(
+                                function(report) {
+                                    return `
+                                        <div
+                                            style="
+                                                margin-bottom:12px;
+                                                padding:15px;
+                                                background:white;
+                                                border:1px solid #e2e8f0;
+                                                border-radius:8px;
+                                            "
+                                        >
+
+                                            <div class="result-row">
+                                                <span class="result-label">
+                                                    Report ID
+                                                </span>
+
+                                                <span class="result-value">
+                                                    ${escapeReportText(report.id)}
+                                                </span>
+                                            </div>
+
+                                            <div
+                                                class="result-row"
+                                                style="margin-top:8px;"
+                                            >
+                                                <span class="result-label">
+                                                    Status
+                                                </span>
+
+                                                <span class="result-value">
+                                                    ${escapeReportText(
+                                                        report.report_status ||
+                                                        "Unknown"
+                                                    )}
+                                                </span>
+                                            </div>
+
+                                            <div
+                                                class="result-row"
+                                                style="margin-top:8px;"
+                                            >
+                                                <span class="result-label">
+                                                    Generated By
+                                                </span>
+
+                                                <span class="result-value">
+                                                    ${escapeReportText(
+                                                        report.generated_by ||
+                                                        "System"
+                                                    )}
+                                                </span>
+                                            </div>
+
+                                            <div
+                                                class="result-row"
+                                                style="margin-top:8px;"
+                                            >
+                                                <span class="result-label">
+                                                    Created
+                                                </span>
+
+                                                <span class="result-value">
+                                                    ${escapeReportText(
+                                                        report.created_at ||
+                                                        "Unknown"
+                                                    )}
+                                                </span>
+                                            </div>
+
+                                            <button
+                                                type="button"
+                                                class="btn btn-secondary btn-small"
+                                                style="margin-top:12px;"
+                                                data-report-text="${encodeURIComponent(
+                                                    report.report_text || ""
+                                                )}"
+                                                onclick="
+                                                    displaySavedReport(
+                                                        decodeURIComponent(
+                                                            this.dataset.reportText
+                                                        )
+                                                    )
+                                                "
+                                            >
+                                                View Report
+                                            </button>
+
+                                        </div>
+                                    `;
+                                }
+                            )
+                            .join("");
+                }
+
+            } catch (error) {
+                if (previous) {
+                    previous.innerHTML = `
+                        <p style="color:#991b1b;">
+                            Could not load previous reports:
+                            ${escapeReportText(error.message)}
+                        </p>
+                    `;
+                }
+
+                console.error(
+                    "Report loading error:",
+                    error
+                );
+            }
+        }
+
+
+        function displaySavedReport(reportText) {
+            const box =
+                document.getElementById(
+                    "generatedReport"
+                );
+
+            if (!box) {
+                return;
+            }
+
+            box.textContent =
+                reportText ||
+                "The selected report does not contain report text.";
+
+            box.scrollIntoView({
+                behavior: "smooth",
+                block: "start"
+            });
+        }
+
+
+        async function generateStudyReport() {
+            const studyId =
+                currentStudyId ||
+                localStorage.getItem(
+                    "currentStudyId"
+                );
+
+            if (!studyId) {
+                showReportMessage(
+                    "Please complete an X-ray study first.",
+                    true
+                );
+
+                return;
+            }
+
+            currentStudyId =
+                Number(studyId);
+
+            localStorage.setItem(
+                "currentStudyId",
+                String(currentStudyId)
+            );
+
+            const button =
+                document.getElementById(
+                    "generateReportButton"
+                );
+
+            const output =
+                document.getElementById(
+                    "generatedReport"
+                );
+
+            if (button) {
+                button.disabled = true;
+                button.textContent =
+                    "Generating Report...";
+            }
+
+            try {
+                /*
+                 * 1. Study information
+                 */
+                const studyResponse =
+                    await fetch(
+                        API_URL +
+                        "/api/studies/" +
+                        currentStudyId
+                    );
+
+                const study =
+                    await studyResponse.json();
+
+                if (!studyResponse.ok) {
+                    throw new Error(
+                        study.detail ||
+                        "Could not load study information."
+                    );
+                }
+
+
+                /*
+                 * 2. AI analysis
+                 */
+                const analysisResponse =
+                    await fetch(
+                        API_URL +
+                        "/api/analysis/" +
+                        currentStudyId
+                    );
+
+                const analysis =
+                    await analysisResponse.json();
+
+                if (!analysisResponse.ok) {
+                    throw new Error(
+                        analysis.detail ||
+                        "Could not load AI analysis."
+                    );
+                }
+
+                const predictions =
+                    Array.isArray(
+                        analysis.predictions
+                    )
+                        ? analysis.predictions
+                        : [];
+
+                if (!predictions.length) {
+                    throw new Error(
+                        "No AI analysis results are available for this study."
+                    );
+                }
+
+
+                /*
+                 * 3. Triage
+                 */
+                const triageResponse =
+                    await fetch(
+                        API_URL +
+                        "/api/analysis/" +
+                        currentStudyId +
+                        "/triage"
+                    );
+
+                const triageResult =
+                    await triageResponse.json();
+
+                if (!triageResponse.ok) {
+                    throw new Error(
+                        triageResult.detail ||
+                        "Could not load triage information."
+                    );
+                }
+
+                const triage =
+                    triageResult.triage ||
+                    null;
+
+
+                /*
+                 * 4. Clinician review
+                 *
+                 * A final report requires at least one
+                 * recorded clinician review.
+                 */
+                const reviewResponse =
+                    await fetch(
+                        API_URL +
+                        "/api/analysis/" +
+                        currentStudyId +
+                        "/review"
+                    );
+
+                const reviewResult =
+                    await reviewResponse.json();
+
+                if (!reviewResponse.ok) {
+                    throw new Error(
+                        reviewResult.detail ||
+                        "Could not load clinician review."
+                    );
+                }
+
+                const reviews =
+                    Array.isArray(
+                        reviewResult.reviews
+                    )
+                        ? reviewResult.reviews
+                        : [];
+
+                if (!reviews.length) {
+                    throw new Error(
+                        "A clinician review is required before generating the final report."
+                    );
+                }
+
+                const latestReview =
+                    reviews[0];
+
+
+                /*
+                 * 5. XAI explanation
+                 */
+                const xaiResponse =
+                    await fetch(
+                        API_URL +
+                        "/api/analysis/" +
+                        currentStudyId +
+                        "/explanation"
+                    );
+
+                const xaiResult =
+                    await xaiResponse.json();
+
+                let explanation = null;
+
+                if (xaiResponse.ok) {
+                    if (
+                        Array.isArray(
+                            xaiResult.explanations
+                        )
+                    ) {
+                        explanation =
+                            xaiResult.explanations[0] ||
+                            null;
+
+                    } else if (
+                        xaiResult.explanation
+                    ) {
+                        explanation =
+                            xaiResult.explanation;
+
+                    } else if (
+                        xaiResult.explanation_path
+                    ) {
+                        explanation =
+                            xaiResult;
+                    }
+                }
+
+
+                /*
+                 * 6. Build the report
+                 */
+                const studyDate =
+                    getReportStudyDate(
+                        study.study_date
+                    );
+
+                const modelName =
+                    analysis.model?.model_name ||
+                    analysis.model?.name ||
+                    "ResNet18 Medical 3-Class";
+
+                const modelVersion =
+                    analysis.model?.version ||
+                    "1.0";
+
+                const lines = [
+                    "AI MEDICAL IMAGING ANALYSIS REPORT",
+                    "=================================",
+                    "",
+                    "STUDY INFORMATION",
+                    "Study ID: " +
+                        currentStudyId,
+                    "Patient ID: " +
+                        (
+                            study.patient_code ||
+                            study.patient_id ||
+                            "Unknown"
+                        ),
+                    "Patient Name: " +
+                        (
+                            study.patient_name ||
+                            "Unknown"
+                        ),
+                    "Age: " +
+                        (
+                            study.age ??
+                            "Not available"
+                        ),
+                    "Gender: " +
+                        (
+                            study.gender ??
+                            "Not available"
+                        ),
+                    "Study Type: " +
+                        (
+                            study.study_type ||
+                            "Chest X-Ray"
+                        ),
+                    "Study Date: " +
+                        studyDate,
+                    "",
+                    "AI ANALYSIS",
+                    "Model: " +
+                        modelName,
+                    "Model Version: " +
+                        modelVersion,
+                    ""
+                ];
+
+
+                /*
+                 * Prediction thresholds:
+                 * use the value stored by the backend when
+                 * available, otherwise use the trained model's
+                 * configured class threshold.
+                 */
+                predictions.forEach(
+                    function(prediction) {
+                        const probability =
+                            Number(
+                                prediction.probability ??
+                                prediction.confidence_score ??
+                                0
+                            );
+
+                        const threshold =
+                            getReportThreshold(
+                                prediction
+                            );
+
+                        const thresholdText =
+                            threshold === null
+                                ? "Not available"
+                                : (
+                                    threshold * 100
+                                ).toFixed(0) + "%";
+
+                        const flagged =
+                            Boolean(
+                                prediction.flagged
+                            );
+
+                        lines.push(
+                            "- " +
+                            (
+                                prediction.class_name ||
+                                prediction.abnormality ||
+                                "Unknown finding"
+                            ) +
+                            ": " +
+                            (
+                                probability * 100
+                            ).toFixed(2) +
+                            "%" +
+                            " | Threshold: " +
+                            thresholdText +
+                            " | " +
+                            (
+                                flagged
+                                    ? "Flagged"
+                                    : "Not Flagged"
+                            )
+                        );
+                    }
+                );
+
+
+                /*
+                 * Explainable AI
+                 */
+                lines.push(
+                    "",
+                    "EXPLAINABLE AI"
+                );
+
+                if (explanation) {
+                    const finding =
+                        getExplanationFinding(
+                            explanation
+                        );
+
+                    lines.push(
+                        "Method: " +
+                            (
+                                explanation.explanation_type ||
+                                explanation.method ||
+                                "Grad-CAM"
+                            ),
+                        "Finding Explained: " +
+                            (
+                                finding ||
+                                "AI finding"
+                            ),
+                        "Model Version: " +
+                            (
+                                explanation.model_version ||
+                                modelVersion
+                            ),
+                        "Explanation Image: " +
+                            (
+                                explanation.explanation_path ||
+                                "Generated"
+                            )
+                    );
+
+                } else {
+                    lines.push(
+                        "No XAI explanation record was available."
+                    );
+                }
+
+
+                /*
+                 * AI triage
+                 */
+                lines.push(
+                    "",
+                    "AI TRIAGE"
+                );
+
+                if (triage) {
+                    lines.push(
+                        "Priority: " +
+                            (
+                                triage.priority ||
+                                "Not available"
+                            ),
+                        "Reason: " +
+                            (
+                                triage.reason ||
+                                "Not available"
+                            )
+                    );
+
+                } else {
+                    lines.push(
+                        "Triage information was not available."
+                    );
+                }
+
+
+                /*
+                 * Clinician review
+                 */
+                lines.push(
+                    "",
+                    "CLINICIAN REVIEW",
+                    "Clinician: " +
+                        (
+                            latestReview.clinician_name ||
+                            "Not available"
+                        ),
+                    "Review Status: " +
+                        (
+                            latestReview.review_status ||
+                            "Not available"
+                        ),
+                    "Final Decision: " +
+                        (
+                            latestReview.final_decision ||
+                            "Not available"
+                        ),
+                    "Comments: " +
+                        (
+                            latestReview.comments ||
+                            "No comments."
+                        ),
+                    "",
+                    "INTERPRETATION NOTICE",
+                    "This report summarizes AI model outputs, explainability information, triage workflow priority, and recorded clinician review.",
+                    "AI outputs and Grad-CAM visualizations do not by themselves establish a medical diagnosis.",
+                    "Final clinical interpretation remains subject to qualified human review."
+                );
+
+
+                const reportText =
+                    lines.join("\n");
+
+
+                /*
+                 * 7. Save final report
+                 */
+                const saveResponse =
+                    await fetch(
+                        API_URL +
+                        "/api/reports/" +
+                        currentStudyId,
+                        {
+                            method: "POST",
+
+                            headers: {
+                                "Content-Type":
+                                    "application/json"
+                            },
+
+                            body: JSON.stringify({
+                                report_status: "Final",
+                                report_text:
+                                    reportText,
+                                generated_by:
+                                    "System + Clinician Review"
+                            })
+                        }
+                    );
+
+                const saveResult =
+                    await saveResponse.json();
+
+                if (!saveResponse.ok) {
+                    throw new Error(
+                        saveResult.detail ||
+                        "Could not save the generated report."
+                    );
+                }
+
+
+                if (output) {
+                    output.textContent =
+                        reportText;
+                }
+
+                showReportMessage(
+                    "Final report generated and saved successfully."
+                );
+
+                await loadReportsPage();
+
+            } catch (error) {
+                showReportMessage(
+                    error.message,
+                    true
+                );
+
+                console.error(
+                    "Report generation error:",
+                    error
+                );
+
+            } finally {
+                if (button) {
+                    button.disabled = false;
+                    button.textContent =
+                        "📄 Generate Final Report";
+                }
+            }
+        }
+
+
+        /* =====================================================
+           ADMIN USER MANAGEMENT
+        ===================================================== */
+
+        function showAdminUserMessage(message, isError = false) {
+
+            const box =
+                document.getElementById("adminUserMessage");
+
+            if (!box) return;
+
+            box.style.display = "block";
+            box.textContent = message;
+            box.style.background =
+                isError ? "#fee2e2" : "#dcfce7";
+            box.style.color =
+                isError ? "#991b1b" : "#166534";
+            box.style.border =
+                isError
+                    ? "1px solid #fecaca"
+                    : "1px solid #bbf7d0";
+
+        }
+
+
+        function clearAdminUserForm() {
+
+            [
+                "adminFullName",
+                "adminUsername",
+                "adminEmail",
+                "adminPassword"
+            ].forEach(function(id) {
+
+                const element =
+                    document.getElementById(id);
+
+                if (element) {
+                    element.value = "";
+                }
+
+            });
+
+            const role =
+                document.getElementById("adminRole");
+
+            if (role) {
+                role.value = "";
+            }
+
+            const message =
+                document.getElementById("adminUserMessage");
+
+            if (message) {
+                message.style.display = "none";
+            }
+
+        }
+
+
+        async function createAdminUser(event) {
+
+            event.preventDefault();
+
+            if (localStorage.getItem("role") !== "Admin") {
+
+                showAdminUserMessage(
+                    "Only an Administrator can create users.",
+                    true
+                );
+
+                return;
+            }
+
+            const fullName =
+                document.getElementById("adminFullName").value.trim();
+
+            const username =
+                document.getElementById("adminUsername").value.trim();
+
+            const email =
+                document.getElementById("adminEmail").value.trim();
+
+            const password =
+                document.getElementById("adminPassword").value;
+
+            const role =
+                document.getElementById("adminRole").value;
+
+            if (!fullName || !username || !email || !password || !role) {
+
+                showAdminUserMessage(
+                    "Please fill in all fields.",
+                    true
+                );
+
+                return;
+            }
+
+            if (password.length < 8) {
+
+                showAdminUserMessage(
+                    "Password must contain at least 8 characters.",
+                    true
+                );
+
+                return;
+            }
+
+            const button =
+                document.getElementById("createUserButton");
+
+            if (button) {
+                button.disabled = true;
+                button.textContent = "Creating...";
+            }
+
+            try {
+
+                const response = await apiFetch(
+                    "/api/admin/users",
+                    {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json"
+                        },
+                        body: JSON.stringify({
+                            full_name: fullName,
+                            username: username,
+                            email: email,
+                            password: password,
+                            role: role
+                        })
+                    }
+                );
+
+                const result = await response.json();
+
+                if (!response.ok) {
+
+                    let message =
+                        result.detail ||
+                        "Could not create user.";
+
+                    if (typeof message === "object") {
+                        message =
+                            message.message ||
+                            "Could not create user.";
+                    }
+
+                    throw new Error(message);
+                }
+
+                showAdminUserMessage(
+                    "User created successfully: " +
+                    result.user.full_name +
+                    " (" +
+                    result.user.role +
+                    ")"
+                );
+
+                clearAdminUserForm();
+                await loadAdminUsers();
+
+            } catch (error) {
+
+                showAdminUserMessage(
+                    error.message,
+                    true
+                );
+
+            } finally {
+
+                if (button) {
+                    button.disabled = false;
+                    button.textContent = "Create User";
+                }
+
+            }
+
+        }
+
+
+        async function loadAdminUsers() {
+
+            const tableBody =
+                document.getElementById("adminUsersTableBody");
+
+            if (!tableBody) return;
+
+            if (localStorage.getItem("role") !== "Admin") {
+
+                tableBody.innerHTML = `
+                    <tr>
+                        <td colspan="5"
+                            style="text-align:center; padding:30px; color:#991b1b;">
+                            Only Administrator can view users.
+                        </td>
+                    </tr>
+                `;
+
+                return;
+            }
+
+            tableBody.innerHTML = `
+                <tr>
+                    <td colspan="5"
+                        style="text-align:center; padding:30px;">
+                        Loading users...
+                    </td>
+                </tr>
+            `;
+
+            try {
+
+                const response =
+                    await apiFetch("/api/admin/users");
+
+                const result =
+                    await response.json();
+
+                if (!response.ok) {
+                    throw new Error(
+                        result.detail ||
+                        "Could not load users."
+                    );
+                }
+
+                const users =
+                    result.users || [];
+
+                if (users.length === 0) {
+
+                    tableBody.innerHTML = `
+                        <tr>
+                            <td colspan="5"
+                                style="text-align:center; padding:30px;">
+                                No users found.
+                            </td>
+                        </tr>
+                    `;
+
+                    return;
+                }
+
+                tableBody.innerHTML = "";
+
+                users.forEach(function(user) {
+
+                    const statusClass =
+                        user.account_status === "ACTIVE"
+                            ? "status"
+                            : "status status-error";
+
+                    tableBody.innerHTML += `
+                        <tr>
+                            <td>${escapeHtml(user.full_name)}</td>
+                            <td>${escapeHtml(user.username)}</td>
+                            <td>${escapeHtml(user.email)}</td>
+                            <td>${escapeHtml(user.role)}</td>
+                            <td>
+                                <span class="${statusClass}">
+                                    ${escapeHtml(user.account_status)}
+                                </span>
+                            </td>
+                        </tr>
+                    `;
+
+                });
+
+            } catch (error) {
+
+                tableBody.innerHTML = `
+                    <tr>
+                        <td colspan="5"
+                            style="text-align:center; padding:30px; color:#991b1b;">
+                            ${escapeHtml(error.message)}
+                        </td>
+                    </tr>
+                `;
+
+            }
+
+        }
+
+
+        function escapeHtml(value) {
+
+            return String(value ?? "")
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+
+        }
+
+
+        /* =====================================================
            LOGOUT
         ===================================================== */
 
         function logout() {
+
+            localStorage.removeItem(
+                "access_token"
+            );
 
             localStorage.removeItem(
                 "loggedIn"
@@ -5089,10 +6690,7 @@
                 "";
 
 
-            document
-                .getElementById("role")
-                .value =
-                "";
+
 
         }
 
@@ -5104,9 +6702,31 @@
         window.onload =
             function() {
 
+                const today =
+                    new Date()
+                        .toISOString()
+                        .split("T")[0];
+
+                const imageStudyDate =
+                    document.getElementById(
+                        "imageStudyDate"
+                    );
+
+                if (imageStudyDate) {
+                    imageStudyDate.max =
+                        today;
+                }
+
                 startApplication();
 
             };
+
+        document.addEventListener(
+            "DOMContentLoaded",
+            function() {
+                updateStudyTypeUI();
+            }
+        );
 
 
     </script>

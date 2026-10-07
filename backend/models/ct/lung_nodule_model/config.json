@@ -1,0 +1,45 @@
+{
+    "task": "Candidate-level lung nodule classification from 3D CT patches",
+
+    "classes": {
+        "0": "Non-nodule candidate",
+        "1": "Nodule candidate"
+    },
+
+    "input": {
+        "shape": [1, 32, 32, 32],
+        "patch_size": [32, 32, 32],
+        "channels": 1
+    },
+
+    "preprocessing": {
+        "resampling": "1 mm isotropic",
+        "hu_window": [-1000, 400],
+        "normalization": "[0,1]"
+    },
+
+    "model": {
+        "architecture": "LungNodule3DCNN",
+        "framework": "PyTorch",
+        "parameters": 1196674
+    },
+
+    "training": {
+        "optimizer": "AdamW",
+        "learning_rate": 0.001,
+        "weight_decay": 0.0001,
+        "batch_size": 16,
+        "epochs": 20,
+        "best_epoch": 15
+    },
+
+    "evaluation": {
+        "threshold": 0.20,
+        "accuracy": 0.9233,
+        "precision": 0.8468,
+        "recall_sensitivity": 0.9400,
+        "specificity": 0.9150,
+        "f1_score": 0.8910,
+        "roc_auc": 0.9860
+    }
+}

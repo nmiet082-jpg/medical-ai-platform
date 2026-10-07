@@ -33,6 +33,44 @@ def create_tables():
 
 
     # =====================================================
+    # USERS TABLE
+    # =====================================================
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+            full_name TEXT NOT NULL,
+
+            username TEXT UNIQUE NOT NULL,
+
+            email TEXT UNIQUE NOT NULL,
+
+            password_hash TEXT NOT NULL,
+
+            role TEXT NOT NULL,
+
+            account_status TEXT NOT NULL
+                DEFAULT 'ACTIVE',
+
+            email_verified INTEGER NOT NULL
+                DEFAULT 0,
+
+            failed_login_attempts INTEGER NOT NULL
+                DEFAULT 0,
+
+            locked_until TIMESTAMP,
+
+            created_at TIMESTAMP
+                DEFAULT CURRENT_TIMESTAMP,
+
+            updated_at TIMESTAMP
+                DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+
+    # =====================================================
     # PATIENTS TABLE
     # =====================================================
 
