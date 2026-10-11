@@ -1499,6 +1499,10 @@
                             <option value="CT Scan">
                                 CT Scan
                             </option>
+
+                            <option value="Breast Ultrasound">
+                                Breast Ultrasound
+                            </option>
                         </select>
 
                     </div>
@@ -1654,6 +1658,32 @@
 
                 </div>
 
+                <!-- BREAST ULTRASOUND RESULT (separate from existing X-ray/CT results) -->
+                <div class="section-card" id="ultrasoundResultSection" style="display:none;">
+                    <h2>Breast Ultrasound AI Analysis</h2>
+                    <div id="ultrasoundAnalysisResult"></div>
+                    <button type="button" class="btn btn-primary" onclick="openUltrasoundReport()">📄 Open Ultrasound Report</button>
+                </div>
+
+                <!-- ==========================================
+                     CT LUNG NODULE AI RESULT
+                =========================================== -->
+
+                <div
+                    class="section-card"
+                    id="ctScanResultSection"
+                    style="display: none;"
+                >
+
+                    <h2>
+                        CT Lung Nodule AI Analysis
+                    </h2>
+
+                    <div id="ctScanResult">
+                    </div>
+
+                </div>
+
             </section>
 
 
@@ -1684,6 +1714,7 @@
                     <p style="color:#64748b; margin-bottom:18px;">
                         Generate a structured report from the selected study's
                         AI analysis, XAI explanation, triage result, and clinician review.
+                        CT studies can generate a draft CT AI triage report from the current CT scan.
                     </p>
                     <div class="result-row">
                         <span class="result-label">Current Study ID</span>
@@ -1889,6 +1920,11 @@
         let currentFileId = null;
 
         let currentStudyId = localStorage.getItem("currentStudyId") || null;
+
+// CT-specific state. The CT series ID is returned by
+// /api/ct/upload-series and is used for preprocessing and AI scanning.
+let currentCTSeriesId =
+    localStorage.getItem("currentCTSeriesId") || null;
 
 
         /* =====================================================
@@ -3161,6 +3197,16 @@
                 fileInput.setAttribute("webkitdirectory", "");
                 fileInput.setAttribute("directory", "");
 
+            } else if (studyType === "Breast Ultrasound") {
+
+                uploadInstruction.textContent =
+                    "Upload a breast ultrasound image in JPG, JPEG or PNG format for research-only AI analysis.";
+
+                fileInput.accept = ".jpg,.jpeg,.png";
+                fileInput.multiple = false;
+                fileInput.removeAttribute("webkitdirectory");
+                fileInput.removeAttribute("directory");
+
             } else {
 
                 uploadInstruction.textContent =
@@ -3280,6 +3326,103 @@
             const studyType =
                 studyTypeSelect.value ||
                 "Chest X-Ray";
+
+            if (studyType === "Breast Ultrasound") {
+
+                const ultrasoundFile = fileInput.files[0];
+                if (!ultrasoundFile || !/\.(jpg|jpeg|png)$/i.test(ultrasoundFile.name)) {
+                    alert("Please select a breast ultrasound image in JPG, JPEG or PNG format.");
+                    return;
+                }
+
+                const validationSection = document.getElementById("validationSection");
+                const validationResult = document.getElementById("validationResult");
+                const cnnButton = document.getElementById("cnnButton");
+
+                validationSection.style.display = "block";
+                cnnButton.style.display = "none";
+                validationResult.innerHTML = `
+                    <div style="padding:16px;border-radius:10px;background:#eff6ff;border:1px solid #bfdbfe;color:#1e3a8a;">
+                        <strong>Running breast ultrasound research model...</strong>
+                    </div>`;
+
+                try {
+                    const formData = new FormData();
+                    formData.append("file", ultrasoundFile);
+
+                    const response = await fetch(
+                        API_URL + "/api/ultrasound/breast/predict",
+                        { method: "POST", body: formData }
+                    );
+                    const result = await response.json();
+                    if (!response.ok) {
+                        throw new Error(result.detail || "Breast ultrasound prediction failed.");
+                    }
+
+                    const probabilities = result.class_probabilities || result.probabilities || result.scores || {};
+                    const predictedClass = result.predicted_class || result.prediction || "Unavailable";
+                    const maskUrl = result.segmentation_mask_png_base64
+                        ? "data:image/png;base64," + result.segmentation_mask_png_base64
+                        : "";
+
+                    const safeClass = String(predictedClass).replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
+                    const score = key => {
+                        const value = Number(probabilities[key]);
+                        if (!Number.isFinite(value)) return "Not provided";
+                        return (value <= 1 ? value * 100 : value).toFixed(2) + "%";
+                    };
+                    const patientOption = patientSelect.options[patientSelect.selectedIndex];
+                    const ultrasoundData = {
+                        studyType: "Breast Ultrasound",
+                        studyId: currentStudyId || localStorage.getItem("currentStudyId") || "Not assigned",
+                        patient: patientOption ? patientOption.textContent.trim() : "Not specified",
+                        studyDate: studyDateInput.value || new Date().toISOString().slice(0,10),
+                        predictedClass: String(predictedClass),
+                        scores: {benign: score("benign"), malignant: score("malignant"), normal: score("normal")},
+                        maskUrl: maskUrl,
+                        generatedAt: new Date().toLocaleString()
+                    };
+                    localStorage.setItem("latestBreastUltrasoundResult", JSON.stringify(ultrasoundData));
+                    localStorage.setItem("latestBreastUltrasoundReport", "");
+
+                    const resultMarkup = `
+                        <div style="padding:20px;border-radius:12px;background:#f8fafc;border:1px solid #dbe3ef;color:#334155;line-height:1.7;">
+                            <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:16px;">
+                                <div style="flex:1;min-width:150px;padding:14px;background:white;border:1px solid #e2e8f0;border-radius:10px;"><div style="font-size:13px;color:#64748b;">Study Type</div><strong>Breast Ultrasound</strong></div>
+                                <div style="flex:1;min-width:150px;padding:14px;background:white;border:1px solid #e2e8f0;border-radius:10px;"><div style="font-size:13px;color:#64748b;">Model Output</div><strong>${safeClass}</strong></div>
+                                <div style="flex:1;min-width:150px;padding:14px;background:white;border:1px solid #e2e8f0;border-radius:10px;"><div style="font-size:13px;color:#64748b;">Study Date</div><strong>${ultrasoundData.studyDate}</strong></div>
+                            </div>
+                            <h3 style="margin:8px 0 12px;color:#0f172a;">Classification Scores</h3>
+                            <table style="width:100%;border-collapse:collapse;background:white;margin-bottom:18px;"><thead><tr style="background:#eff4fa;text-align:left;"><th style="padding:11px;border-bottom:1px solid #e2e8f0;">Class</th><th style="padding:11px;border-bottom:1px solid #e2e8f0;">Model Score</th></tr></thead><tbody>
+                                <tr><td style="padding:11px;border-bottom:1px solid #e2e8f0;">Benign</td><td style="padding:11px;border-bottom:1px solid #e2e8f0;">${ultrasoundData.scores.benign}</td></tr>
+                                <tr><td style="padding:11px;border-bottom:1px solid #e2e8f0;">Malignant</td><td style="padding:11px;border-bottom:1px solid #e2e8f0;">${ultrasoundData.scores.malignant}</td></tr>
+                                <tr><td style="padding:11px;border-bottom:1px solid #e2e8f0;">Normal</td><td style="padding:11px;border-bottom:1px solid #e2e8f0;">${ultrasoundData.scores.normal}</td></tr>
+                            </tbody></table>
+                            <h3 style="margin:8px 0 12px;color:#0f172a;">Segmentation Visualization</h3>
+                            ${maskUrl ? `<img src="${maskUrl}" alt="Research segmentation mask" style="display:block;width:256px;max-width:100%;height:auto;border:1px solid #cbd5e1;border-radius:8px;background:white;margin:8px 0 10px;"><a href="${maskUrl}" download="breast_ultrasound_mask.png">Download segmentation mask</a>` : `<p>No segmentation mask was returned by the model.</p>`}
+                            <h3 style="margin:18px 0 8px;color:#0f172a;">AI Output Summary</h3>
+                            <p>The model returned <strong>${safeClass}</strong> as its predicted class. The class scores and segmentation mask shown above are model outputs only; they do not independently establish a clinical finding.</p>
+                            <p style="margin-top:16px;padding:12px;border-radius:8px;background:#fffbeb;border:1px solid #fde68a;color:#92400e;"><strong>Research prototype only.</strong> This output is not a diagnosis or validated clinical assessment. Qualified clinical review is required.</p>
+                        </div>`;
+                    validationResult.innerHTML = resultMarkup;
+                    const aiSection = document.getElementById("ultrasoundResultSection");
+                    const aiResult = document.getElementById("ultrasoundAnalysisResult");
+                    if (aiSection && aiResult) {
+                        aiResult.innerHTML = resultMarkup;
+                        aiSection.style.display = "block";
+                    }
+                    const analysisNav = document.querySelector('button.nav-item[onclick*="analysisPage"]');
+                    showPage("analysisPage", analysisNav);
+                    if (aiSection) aiSection.scrollIntoView({behavior:"smooth", block:"start"});
+                } catch (error) {
+                    validationResult.innerHTML = `
+                        <div style="padding:16px;border-radius:10px;background:#fef2f2;border:1px solid #fecaca;color:#991b1b;">
+                            <strong>Breast ultrasound analysis failed</strong><p>${error.message}</p>
+                        </div>`;
+                }
+
+                return;
+            }
 
             if (studyType === "CT Scan") {
 
@@ -3424,10 +3567,12 @@
                         );
                     }
 
-                    alert(
-                        "CT DICOM series uploaded successfully. " +
-                        uploadResult.slice_count +
-                        " DICOM slices were received."
+                    currentCTSeriesId =
+                        uploadResult.series_id;
+
+                    localStorage.setItem(
+                        "currentCTSeriesId",
+                        String(currentCTSeriesId)
                     );
 
                     const validationSection =
@@ -3447,16 +3592,64 @@
 
                     if (validationResult) {
                         validationResult.innerHTML = `
-                            <div class="alert alert-success">
+                            <div style="
+                                padding:16px;
+                                border-radius:10px;
+                                background:#eff6ff;
+                                border:1px solid #bfdbfe;
+                                color:#1e3a8a;
+                                line-height:1.7;
+                            ">
                                 <strong>CT DICOM Series Uploaded</strong><br>
                                 Study ID: ${currentStudyId}<br>
                                 DICOM slices received: ${uploadResult.slice_count}<br>
-                                Series ID: ${uploadResult.series_id}
+                                Series ID: ${uploadResult.series_id}<br>
+                                <span id="ctPipelineStatus">
+                                    Starting CT preprocessing...
+                                </span>
                             </div>
                         `;
                     }
 
-                    // CT preprocessing will be connected in the next step.
+                    // --------------------------------------------------
+                    // 3. Preprocess the uploaded CT volume
+                    // --------------------------------------------------
+
+                    const preprocessResponse =
+                        await apiFetch(
+                            "/api/ct/preprocess/" +
+                            encodeURIComponent(currentCTSeriesId),
+                            {
+                                method: "POST"
+                            }
+                        );
+
+                    const preprocessResult =
+                        await preprocessResponse.json();
+
+                    if (!preprocessResponse.ok) {
+                        throw new Error(
+                            preprocessResult.detail ||
+                            "CT preprocessing failed."
+                        );
+                    }
+
+                    const ctPipelineStatus =
+                        document.getElementById(
+                            "ctPipelineStatus"
+                        );
+
+                    if (ctPipelineStatus) {
+                        ctPipelineStatus.textContent =
+                            "Preprocessing completed. Running CT AI scan...";
+                    }
+
+                    // --------------------------------------------------
+                    // 4. Run the authenticated whole-volume candidate scan
+                    // --------------------------------------------------
+
+                    await runCTAIScan(currentCTSeriesId);
+
                     return;
 
                 } catch (error) {
@@ -3902,6 +4095,890 @@
            AI ANALYSIS
            Started from Medical Images, displayed in AI Analysis
         ===================================================== */
+
+
+        /* =====================================================
+           CT LUNG NODULE AI SCAN
+           Upload -> preprocess -> sliding-window candidate scan
+        ===================================================== */
+
+
+        async function loadCTTriageAndHeatmap(seriesId, candidateIndex = 0) {
+
+            const triageBox =
+                document.getElementById("ctTriageResult");
+
+            const heatmapBox =
+                document.getElementById("ctHeatmapResult");
+
+            if (triageBox) {
+                triageBox.innerHTML = `
+                    <div style="padding:14px; color:#475569;">
+                        Loading CT triage...
+                    </div>
+                `;
+            }
+
+            if (heatmapBox) {
+                heatmapBox.innerHTML = `
+                    <div style="padding:14px; color:#475569;">
+                        Generating 3D Grad-CAM explanation...
+                    </div>
+                `;
+            }
+
+            try {
+
+                const triageResponse =
+                    await apiFetch(
+                        "/api/ct/triage/" +
+                        encodeURIComponent(seriesId),
+                        {
+                            method: "POST"
+                        }
+                    );
+
+                const triageResult =
+                    await triageResponse.json();
+
+                if (!triageResponse.ok) {
+                    throw new Error(
+                        triageResult.detail ||
+                        "Could not calculate CT triage."
+                    );
+                }
+
+                const triage =
+                    triageResult.triage || {};
+
+                const priority =
+                    triage.priority ||
+                    "AI Inconclusive / Manual Review";
+
+                if (triageBox) {
+                    const isHigh =
+                        priority === "High Priority";
+
+                    triageBox.innerHTML = `
+                        <div style="
+                            padding:18px;
+                            border-radius:12px;
+                            background:${isHigh ? "#fef2f2" : "#f8fafc"};
+                            border:1px solid ${isHigh ? "#fecaca" : "#e2e8f0"};
+                        ">
+                            <div style="
+                                display:flex;
+                                justify-content:space-between;
+                                align-items:center;
+                                gap:15px;
+                                flex-wrap:wrap;
+                            ">
+                                <div>
+                                    <h3 style="margin:0 0 8px;">
+                                        CT Triage Priority
+                                    </h3>
+                                    <div style="
+                                        font-size:20px;
+                                        font-weight:700;
+                                        color:${isHigh ? "#991b1b" : "#334155"};
+                                    ">
+                                        ${priority}
+                                    </div>
+                                </div>
+
+                                <div style="
+                                    padding:8px 12px;
+                                    border-radius:999px;
+                                    background:white;
+                                    border:1px solid #cbd5e1;
+                                    font-size:13px;
+                                ">
+                                    Operational workflow priority
+                                </div>
+                            </div>
+
+                            <p style="
+                                margin:14px 0 0;
+                                color:#475569;
+                                line-height:1.6;
+                            ">
+                                ${triage.reason || "No triage reason available."}
+                            </p>
+
+                            <p style="
+                                margin:12px 0 0;
+                                color:#92400e;
+                                font-size:13px;
+                                line-height:1.5;
+                            ">
+                                ⚠️ This priority is an AI-assisted research workflow
+                                output, not a medical diagnosis. Clinician review is required.
+                            </p>
+
+                            <button
+                                class="btn btn-primary"
+                                type="button"
+                                style="margin-top:15px;"
+                                onclick="generateCTTriageReport(
+                                    ${triageResult.study_id || "null"},
+                                    '${seriesId}'
+                                )"
+                            >
+                                📄 Generate CT Triage Report
+                            </button>
+                        </div>
+                    `;
+                }
+
+                const xaiResponse =
+                    await apiFetch(
+                        "/api/ct/explanation/" +
+                        encodeURIComponent(seriesId) +
+                        "?candidate_index=" +
+                        encodeURIComponent(candidateIndex),
+                        {
+                            method: "POST"
+                        }
+                    );
+
+                const xaiResult =
+                    await xaiResponse.json();
+
+                if (!xaiResponse.ok) {
+                    throw new Error(
+                        xaiResult.detail ||
+                        "Could not generate CT Grad-CAM explanation."
+                    );
+                }
+
+                const explanation =
+                    xaiResult.explanation || {};
+
+                const explanationUrl = explanation.url
+                    ? (
+                        explanation.url.startsWith("http")
+                            ? explanation.url
+                            : API_URL + explanation.url
+                    )
+                    : "";
+
+                if (heatmapBox) {
+                    heatmapBox.innerHTML = `
+                        <div style="
+                            padding:18px;
+                            border-radius:12px;
+                            background:#f8fafc;
+                            border:1px solid #e2e8f0;
+                        ">
+                            <h3 style="margin-top:0;">
+                                CT Explainability — 3D Grad-CAM
+                            </h3>
+
+                            <p style="
+                                color:#475569;
+                                line-height:1.6;
+                            ">
+                                The left panel shows the candidate CT patch.
+                                The right panel overlays the model activation
+                                heatmap for the nodule-candidate class.
+                            </p>
+
+                            ${
+                                explanationUrl
+                                    ? `
+                                        <div style="
+                                            overflow:auto;
+                                            margin-top:15px;
+                                            background:#0f172a;
+                                            border-radius:10px;
+                                            padding:10px;
+                                        ">
+                                            <img
+                                                src="${explanationUrl}"
+                                                alt="CT 3D Grad-CAM explanation"
+                                                style="
+                                                    display:block;
+                                                    width:100%;
+                                                    max-width:1024px;
+                                                    margin:0 auto;
+                                                    border-radius:6px;
+                                                "
+                                            >
+                                        </div>
+                                    `
+                                    : `
+                                        <div style="padding:14px;">
+                                            Explanation artifact was not returned.
+                                        </div>
+                                    `
+                            }
+
+                            <div class="result-row" style="margin-top:15px;">
+                                <span class="result-label">
+                                    Explanation Method
+                                </span>
+                                <span class="result-value">
+                                    ${explanation.method || "3D Grad-CAM"}
+                                </span>
+                            </div>
+
+                            <div class="result-row">
+                                <span class="result-label">
+                                    Explained Class
+                                </span>
+                                <span class="result-value">
+                                    ${explanation.target_class_name || "Nodule candidate"}
+                                </span>
+                            </div>
+
+                            <div class="result-row">
+                                <span class="result-label">
+                                    Candidate Center
+                                </span>
+                                <span class="result-value">
+                                    Z: ${explanation.candidate_center?.z ?? "-"},
+                                    Y: ${explanation.candidate_center?.y ?? "-"},
+                                    X: ${explanation.candidate_center?.x ?? "-"}
+                                </span>
+                            </div>
+
+                            <div style="
+                                margin-top:15px;
+                                padding:12px;
+                                background:#fffbeb;
+                                border:1px solid #fde68a;
+                                border-radius:8px;
+                                color:#92400e;
+                                font-size:13px;
+                                line-height:1.5;
+                            ">
+                                ⚠️ A Grad-CAM heatmap explains model activation.
+                                It does not prove disease presence, absence, or causality.
+                            </div>
+                        </div>
+                    `;
+                }
+
+            } catch (error) {
+
+                if (triageBox) {
+                    triageBox.innerHTML = `
+                        <div style="
+                            padding:14px;
+                            border-radius:8px;
+                            background:#fef2f2;
+                            color:#991b1b;
+                        ">
+                            CT triage error: ${error.message}
+                        </div>
+                    `;
+                }
+
+                if (heatmapBox) {
+                    heatmapBox.innerHTML = `
+                        <div style="
+                            padding:14px;
+                            border-radius:8px;
+                            background:#fef2f2;
+                            color:#991b1b;
+                        ">
+                            CT explainability error: ${error.message}
+                        </div>
+                    `;
+                }
+
+                console.error(
+                    "CT triage/XAI error:",
+                    error
+                );
+            }
+        }
+
+
+        async function generateCTTriageReport(studyId, seriesId) {
+
+            if (!studyId) {
+                alert(
+                    "No study is associated with this CT series."
+                );
+                return;
+            }
+
+            try {
+
+                const scan =
+                    window.currentCTScanResult &&
+                    window.currentCTScanResult.series_id === seriesId
+                        ? window.currentCTScanResult
+                        : null;
+
+                if (!scan) {
+                    throw new Error(
+                        "The current CT scan result is not available. " +
+                        "Run the CT AI analysis again before generating the report."
+                    );
+                }
+
+                const triageResponse =
+                    await apiFetch(
+                        "/api/ct/triage/" +
+                        encodeURIComponent(seriesId)
+                    );
+
+                const triagePayload =
+                    await triageResponse.json();
+
+                if (!triageResponse.ok) {
+                    throw new Error(
+                        triagePayload.detail ||
+                        "Could not load CT triage."
+                    );
+                }
+
+                const triage =
+                    triagePayload.triage || {};
+
+                const candidates =
+                    Array.isArray(scan.candidates)
+                        ? scan.candidates
+                        : [];
+
+                const top =
+                    candidates[0] || {};
+
+                const topPrediction =
+                    top.prediction || {};
+
+                const topProbability =
+                    (
+                        Number(
+                            topPrediction.probability_nodule ?? 0
+                        ) * 100
+                    ).toFixed(2);
+
+                const reportText = [
+                    "CT AI TRIAGE REPORT — DRAFT",
+                    "",
+                    `Study ID: ${studyId}`,
+                    `CT Series ID: ${seriesId}`,
+                    "",
+                    "AI MODEL",
+                    `Model: ${scan.model?.name || "Lung Nodule 3D CNN"}`,
+                    `Version: ${scan.model?.version || "-"}`,
+                    `Architecture: ${scan.model?.architecture || "LungNodule3DCNN"}`,
+                    "",
+                    "CT SCAN ANALYSIS",
+                    `Volume: ${(scan.scan?.volume_shape || []).join(" × ")}`,
+                    `Patch size: ${(scan.scan?.patch_size || []).join(" × ")}`,
+                    `Stride: ${scan.scan?.stride ?? "-"}`,
+                    `Windows evaluated: ${scan.scan?.windows_evaluated ?? "-"}`,
+                    `Raw candidates above threshold: ${scan.scan?.raw_candidates_above_threshold ?? "-"}`,
+                    `Returned candidates: ${scan.candidate_count ?? candidates.length}`,
+                    "",
+                    "TOP AI CANDIDATE",
+                    `Finding: ${topPrediction.class || "Nodule candidate"}`,
+                    `Model score: ${topProbability}%`,
+                    `Center: Z=${top.center?.z ?? "-"}, Y=${top.center?.y ?? "-"}, X=${top.center?.x ?? "-"}`,
+                    "",
+                    "AI TRIAGE",
+                    `Priority: ${triage.priority || "AI Inconclusive / Manual Review"}`,
+                    `Reason: ${triage.reason || "Not available"}`,
+                    "",
+                    "EXPLAINABILITY",
+                    "Method: 3D Grad-CAM",
+                    "An activation heatmap is available in the AI Analysis view for the selected top candidate.",
+                    "",
+                    "INTERPRETATION NOTICE",
+                    "This is a draft AI-assisted research workflow report.",
+                    "The model output and Grad-CAM visualization do not establish a medical diagnosis.",
+                    "Clinical interpretation and final review remain the responsibility of a qualified clinician."
+                ].join("\n");
+
+                const saveResponse =
+                    await apiFetch(
+                        "/api/reports/" +
+                        encodeURIComponent(studyId),
+                        {
+                            method: "POST",
+                            headers: {
+                                "Content-Type": "application/json"
+                            },
+                            body: JSON.stringify({
+                                report_status: "Draft",
+                                report_text: reportText,
+                                generated_by: "CT AI Research Workflow"
+                            })
+                        }
+                    );
+
+                const saveResult =
+                    await saveResponse.json();
+
+                if (!saveResponse.ok) {
+                    throw new Error(
+                        saveResult.detail ||
+                        "Could not save the CT triage report."
+                    );
+                }
+
+                alert(
+                    "CT triage report generated and saved as Draft."
+                );
+
+            } catch (error) {
+
+                alert(
+                    "CT triage report generation failed:\n" +
+                    error.message
+                );
+
+                console.error(
+                    "CT report error:",
+                    error
+                );
+            }
+        }
+
+
+        async function runCTAIScan(seriesId) {
+
+            if (!seriesId) {
+                alert("No CT series is available for AI analysis.");
+                return;
+            }
+
+            const analysisNavButton =
+                document.querySelector(
+                    'button.nav-item[onclick*="analysisPage"]'
+                );
+
+            showPage(
+                "analysisPage",
+                analysisNavButton
+            );
+
+            const resultSection =
+                document.getElementById(
+                    "ctScanResultSection"
+                );
+
+            const resultBox =
+                document.getElementById(
+                    "ctScanResult"
+                );
+
+            if (resultSection) {
+                resultSection.style.display = "block";
+            }
+
+            if (resultBox) {
+                resultBox.innerHTML = `
+                    <div style="
+                        padding:18px;
+                        border-radius:10px;
+                        background:#eff6ff;
+                        border:1px solid #bfdbfe;
+                        color:#1e3a8a;
+                    ">
+                        <strong>🤖 Running CT AI analysis...</strong>
+                        <p style="margin-top:8px;">
+                            The system is evaluating 3D CT windows and ranking candidate locations.
+                        </p>
+                    </div>
+                `;
+            }
+
+            try {
+
+                const response =
+                    await apiFetch(
+                        "/api/ct/scan/" +
+                        encodeURIComponent(seriesId),
+                        {
+                            method: "POST"
+                        }
+                    );
+
+                const result =
+                    await response.json();
+
+                window.currentCTScanResult = result;
+
+                if (!response.ok) {
+                    throw new Error(
+                        result.detail ||
+                        "CT AI scan failed."
+                    );
+                }
+
+                const candidates =
+                    Array.isArray(result.candidates)
+                        ? result.candidates
+                        : [];
+
+                // The backend returns scan metadata under result.scan.
+                const scan =
+                    result.scan || {};
+
+                let candidateRows = "";
+
+                candidates.forEach(
+                    function(candidate, index) {
+
+                        // Backend shape:
+                        // candidate.prediction.probability_nodule
+                        const prediction =
+                            candidate.prediction || {};
+
+                        const probability =
+                            (
+                                Number(
+                                    prediction.probability_nodule ?? 0
+                                ) * 100
+                            ).toFixed(2);
+
+                        const finding =
+                            prediction.class ||
+                            "Nodule candidate";
+
+                        const z =
+                            candidate.center?.z ?? "-";
+
+                        const y =
+                            candidate.center?.y ?? "-";
+
+                        const x =
+                            candidate.center?.x ?? "-";
+
+                        candidateRows += `
+                            <tr>
+                                <td>${index + 1}</td>
+                                <td>${probability}%</td>
+                                <td>${finding}</td>
+                                <td>${z}</td>
+                                <td>${y}</td>
+                                <td>${x}</td>
+                            </tr>
+                        `;
+                    }
+                );
+
+                const topCandidate =
+                    candidates.length > 0
+                        ? candidates[0]
+                        : null;
+
+                const topPrediction =
+                    topCandidate?.prediction || {};
+
+                const topProbability =
+                    topCandidate
+                        ? (
+                            Number(
+                                topPrediction.probability_nodule ?? 0
+                            ) * 100
+                        ).toFixed(2)
+                        : "0.00";
+
+                const topCenter =
+                    topCandidate?.center || {};
+
+                const volumeShape =
+                    Array.isArray(scan.volume_shape)
+                        ? scan.volume_shape.join(" × ")
+                        : "-";
+
+                const patchSize =
+                    Array.isArray(scan.patch_size)
+                        ? scan.patch_size.join(" × ")
+                        : "-";
+
+                if (resultBox) {
+                    resultBox.innerHTML = `
+
+                        <div style="
+                            padding:16px;
+                            border-radius:10px;
+                            background:#f0fdf4;
+                            border:1px solid #bbf7d0;
+                            color:#166534;
+                            margin-bottom:20px;
+                        ">
+                            <strong>✓ CT AI scan completed</strong>
+                            <div style="margin-top:8px;">
+                                Research candidate proposal completed successfully.
+                            </div>
+                        </div>
+
+                        <div class="result-row">
+                            <span class="result-label">
+                                Series ID
+                            </span>
+                            <span class="result-value">
+                                ${result.series_id || seriesId}
+                            </span>
+                        </div>
+
+                        <div class="result-row">
+                            <span class="result-label">
+                                CT Volume
+                            </span>
+                            <span class="result-value">
+                                ${volumeShape}
+                            </span>
+                        </div>
+
+                        <div class="result-row">
+                            <span class="result-label">
+                                Patch Size
+                            </span>
+                            <span class="result-value">
+                                ${patchSize}
+                            </span>
+                        </div>
+
+                        <div class="result-row">
+                            <span class="result-label">
+                                Stride
+                            </span>
+                            <span class="result-value">
+                                ${scan.stride ?? "-"}
+                            </span>
+                        </div>
+
+                        <div class="result-row">
+                            <span class="result-label">
+                                Windows Evaluated
+                            </span>
+                            <span class="result-value">
+                                ${scan.windows_evaluated ?? "-"}
+                            </span>
+                        </div>
+
+                        <div class="result-row">
+                            <span class="result-label">
+                                Raw Candidates ≥ Threshold
+                            </span>
+                            <span class="result-value">
+                                ${scan.raw_candidates_above_threshold ?? "-"}
+                            </span>
+                        </div>
+
+                        <div class="result-row">
+                            <span class="result-label">
+                                Returned Candidates
+                            </span>
+                            <span class="result-value">
+                                ${result.candidate_count ?? candidates.length}
+                            </span>
+                        </div>
+
+                        <div class="result-row">
+                            <span class="result-label">
+                                Model Threshold
+                            </span>
+                            <span class="result-value">
+                                ${
+                                    result.model?.threshold != null
+                                        ? (
+                                            Number(result.model.threshold) * 100
+                                        ).toFixed(1) + "%"
+                                        : "-"
+                                }
+                            </span>
+                        </div>
+
+                        ${
+                            topCandidate
+                                ? `
+                                    <div style="
+                                        margin-top:24px;
+                                        padding:20px;
+                                        border-radius:12px;
+                                        background:#f8fafc;
+                                        border:1px solid #e2e8f0;
+                                    ">
+                                        <h3 style="margin-bottom:12px;">
+                                            Top Candidate
+                                        </h3>
+
+                                        <div class="result-row">
+                                            <span class="result-label">
+                                                Finding
+                                            </span>
+                                            <span class="result-value">
+                                                ${
+                                                    topPrediction.class ||
+                                                    "Nodule candidate"
+                                                }
+                                            </span>
+                                        </div>
+
+                                        <div class="result-row">
+                                            <span class="result-label">
+                                                Nodule Probability
+                                            </span>
+                                            <span class="result-value">
+                                                <strong>
+                                                    ${topProbability}%
+                                                </strong>
+                                            </span>
+                                        </div>
+
+                                        <div class="result-row">
+                                            <span class="result-label">
+                                                Candidate Center
+                                            </span>
+                                            <span class="result-value">
+                                                Z: ${topCenter.z ?? "-"},
+                                                Y: ${topCenter.y ?? "-"},
+                                                X: ${topCenter.x ?? "-"}
+                                            </span>
+                                        </div>
+                                    </div>
+                                `
+                                : `
+                                    <div style="
+                                        margin-top:20px;
+                                        padding:16px;
+                                        border-radius:10px;
+                                        background:#f8fafc;
+                                    ">
+                                        No candidates were returned above the configured threshold.
+                                    </div>
+                                `
+                        }
+
+                        ${
+                            candidates.length
+                                ? `
+                                    <h3 style="margin-top:28px; margin-bottom:12px;">
+                                        Ranked CT Candidates
+                                    </h3>
+
+                                    <div class="table-container">
+                                        <table style="min-width:800px;">
+                                            <thead>
+                                                <tr>
+                                                    <th>Rank</th>
+                                                    <th>Nodule Probability</th>
+                                                    <th>Finding</th>
+                                                    <th>Z</th>
+                                                    <th>Y</th>
+                                                    <th>X</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                ${candidateRows}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                `
+                                : ""
+                        }
+
+                        <div
+                            id="ctTriageResult"
+                            style="margin-top:28px;"
+                        ></div>
+
+                        <div
+                            id="ctHeatmapResult"
+                            style="margin-top:24px;"
+                        ></div>
+
+                        <div style="
+                            margin-top:24px;
+                            padding:16px;
+                            border-radius:10px;
+                            background:#fffbeb;
+                            border:1px solid #fde68a;
+                            color:#92400e;
+                            line-height:1.6;
+                        ">
+                            <strong>⚠️ Research-only output</strong><br>
+                            ${
+                                result.clinical_note ||
+                                "A candidate is not a confirmed nodule or cancer diagnosis. This research prototype should not be used as an autonomous clinical decision."
+                            }
+                        </div>
+
+                        <details style="margin-top:18px;">
+                            <summary style="cursor:pointer; font-weight:600;">
+                                View raw CT AI response
+                            </summary>
+                            <pre style="
+                                margin-top:12px;
+                                padding:15px;
+                                background:#0f172a;
+                                color:#e2e8f0;
+                                border-radius:8px;
+                                overflow:auto;
+                                max-height:400px;
+                                font-size:12px;
+                            ">${JSON.stringify(result, null, 2)}</pre>
+                        </details>
+                    `;
+                }
+
+                // --------------------------------------------------
+                // 5. Continue the SRS CT workflow: XAI + triage + report
+                // The result containers above now exist in the DOM, so the
+                // CT explanation/triage loader can safely populate them.
+                // --------------------------------------------------
+                await loadCTTriageAndHeatmap(seriesId, 0);
+
+                const validationResult =
+                    document.getElementById(
+                        "validationResult"
+                    );
+
+                if (validationResult) {
+                    validationResult.innerHTML = `
+                        <div style="
+                            padding:16px;
+                            border-radius:10px;
+                            background:#f0fdf4;
+                            border:1px solid #bbf7d0;
+                            color:#166534;
+                            line-height:1.7;
+                        ">
+                            <strong>✓ CT workflow completed</strong><br>
+                            DICOM upload → preprocessing → AI candidate scan<br>
+                            Returned candidates: ${
+                                result.candidate_count ?? candidates.length
+                            }
+                            <br><br>
+                            Open <strong>AI Analysis</strong> for the detailed ranked results.
+                        </div>
+                    `;
+                }
+
+            } catch (error) {
+
+                if (resultBox) {
+                    resultBox.innerHTML = `
+                        <div style="
+                            padding:16px;
+                            border-radius:10px;
+                            background:#fef2f2;
+                            border:1px solid #fecaca;
+                            color:#991b1b;
+                            line-height:1.6;
+                        ">
+                            <strong>CT AI analysis failed</strong><br>
+                            ${error.message}
+                        </div>
+                    `;
+                }
+
+                alert(
+                    "CT AI analysis failed:\n" +
+                    error.message
+                );
+            }
+        }
+
 
         async function runCNNAnalysis() {
 
@@ -5614,6 +6691,44 @@
         }
 
 
+        function buildUltrasoundReport(data) {
+            const line = "============================================================";
+            return [
+                "BREAST ULTRASOUND AI REPORT — RESEARCH DRAFT",
+                line,
+                "Study type: Breast Ultrasound",
+                "Study ID: " + (data.studyId || "Not assigned"),
+                "Patient: " + (data.patient || "Not specified"),
+                "Study date: " + (data.studyDate || "Not specified"),
+                "Generated: " + (data.generatedAt || new Date().toLocaleString()),
+                "",
+                "1. MODEL OUTPUT",
+                "Predicted class: " + (data.predictedClass || "Not available"),
+                "This is the model's predicted class, not a confirmed diagnosis.",
+                "",
+                "2. CLASSIFICATION SCORES",
+                "Benign: " + (data.scores?.benign || "Not provided"),
+                "Malignant: " + (data.scores?.malignant || "Not provided"),
+                "Normal: " + (data.scores?.normal || "Not provided"),
+                "",
+                "3. SEGMENTATION",
+                data.maskUrl ? "A segmentation mask was returned by the model and is available in the AI Analysis section." : "No segmentation mask was returned by the model.",
+                "",
+                "4. INTERPRETATION LIMITATION",
+                "Automated research output only. No independent clinical finding, lesion measurement, BI-RADS category, or treatment recommendation is inferred by this report.",
+                "",
+                "5. REVIEW STATUS",
+                "Draft — qualified clinician/radiologist review required before any clinical use.",
+                line
+            ].join("\n");
+        }
+
+        function openUltrasoundReport() {
+            const reportsNav = document.querySelector('button.nav-item[onclick*="reportsPage"]');
+            showPage("reportsPage", reportsNav);
+            generateStudyReport();
+        }
+
         async function loadReportsPage() {
             const studyEl =
                 document.getElementById(
@@ -5656,6 +6771,49 @@
             if (studyEl) {
                 studyEl.textContent =
                     currentStudyId;
+            }
+
+            // CT-aware report mode. When the currently selected study
+            // is the CT study that was just analyzed, the Reports page
+            // should offer the CT draft report instead of trying to use
+            // the X-ray /api/analysis/{study_id} workflow.
+            const reportButton =
+                document.getElementById(
+                    "generateReportButton"
+                );
+
+            const activeCTSeriesId =
+                currentCTSeriesId ||
+                localStorage.getItem(
+                    "currentCTSeriesId"
+                );
+
+            const activeCTScan =
+                window.currentCTScanResult ||
+                null;
+
+            const isCurrentCTStudy =
+                Boolean(
+                    activeCTSeriesId &&
+                    activeCTScan &&
+                    String(activeCTScan.series_id) ===
+                        String(activeCTSeriesId) &&
+                    String(activeCTScan.study_id) ===
+                        String(currentStudyId)
+                );
+
+            const storedUltrasound = (() => { try { return JSON.parse(localStorage.getItem("latestBreastUltrasoundResult") || "null"); } catch (_) { return null; } })();
+            const isCurrentUltrasoundStudy = Boolean(storedUltrasound && String(storedUltrasound.studyId) === String(currentStudyId));
+            if (reportButton) {
+                reportButton.textContent = isCurrentCTStudy
+                    ? "📄 Generate CT Draft Report"
+                    : isCurrentUltrasoundStudy
+                        ? "📄 Generate Ultrasound Draft Report"
+                        : "📄 Generate Final Report";
+            }
+            if (isCurrentUltrasoundStudy) {
+                const previousReports = document.getElementById("previousReports");
+                if (previousReports) previousReports.innerHTML = "<p>Ultrasound draft reports generated in this browser are shown in the report preview. Server-saved report history is not available for this ultrasound workflow yet.</p>";
             }
 
             try {
@@ -5848,7 +7006,7 @@
 
             if (!studyId) {
                 showReportMessage(
-                    "Please complete an X-ray study first.",
+                    "Please complete a study first.",
                     true
                 );
 
@@ -5862,6 +7020,18 @@
                 "currentStudyId",
                 String(currentStudyId)
             );
+
+            const ultrasoundRaw = localStorage.getItem("latestBreastUltrasoundResult");
+            let ultrasoundData = null;
+            try { ultrasoundData = ultrasoundRaw ? JSON.parse(ultrasoundRaw) : null; } catch (_) {}
+            if (ultrasoundData && String(ultrasoundData.studyId) === String(currentStudyId)) {
+                const reportText = buildUltrasoundReport(ultrasoundData);
+                localStorage.setItem("latestBreastUltrasoundReport", reportText);
+                const outputEl = document.getElementById("generatedReport");
+                if (outputEl) outputEl.textContent = reportText;
+                showReportMessage("Breast ultrasound research draft generated in this browser. It has not been saved to the server report database.");
+                return;
+            }
 
             const button =
                 document.getElementById(
@@ -5880,6 +7050,77 @@
             }
 
             try {
+                // --------------------------------------------------
+                // CT report path
+                // --------------------------------------------------
+                // The existing X-ray report workflow calls
+                // /api/analysis/{study_id}. CT analysis is stored and
+                // surfaced through the CT scan/triage workflow instead,
+                // so sending a CT study through the X-ray endpoint
+                // incorrectly produces "No AI analysis results".
+                const activeCTSeriesId =
+                    currentCTSeriesId ||
+                    localStorage.getItem(
+                        "currentCTSeriesId"
+                    );
+
+                const activeCTScan =
+                    window.currentCTScanResult ||
+                    null;
+
+                const isCurrentCTStudy =
+                    Boolean(
+                        activeCTSeriesId &&
+                        activeCTScan &&
+                        String(activeCTScan.series_id) ===
+                            String(activeCTSeriesId) &&
+                        String(activeCTScan.study_id) ===
+                            String(currentStudyId)
+                    );
+
+                if (isCurrentCTStudy) {
+                    await generateCTTriageReport(
+                        currentStudyId,
+                        activeCTSeriesId
+                    );
+
+                    // The CT helper saves the report as Draft. Load the
+                    // saved record and show it immediately in this page.
+                    const ctReportsResponse =
+                        await apiFetch(
+                            "/api/reports/" +
+                            encodeURIComponent(currentStudyId)
+                        );
+
+                    const ctReportsResult =
+                        await ctReportsResponse.json();
+
+                    if (!ctReportsResponse.ok) {
+                        throw new Error(
+                            ctReportsResult.detail ||
+                            "CT report was generated but could not be loaded."
+                        );
+                    }
+
+                    const ctReports =
+                        Array.isArray(ctReportsResult.reports)
+                            ? ctReportsResult.reports
+                            : [];
+
+                    if (ctReports.length && output) {
+                        output.textContent =
+                            ctReports[0].report_text ||
+                            "CT report was saved without report text.";
+                    }
+
+                    showReportMessage(
+                        "CT draft report generated and saved successfully."
+                    );
+
+                    await loadReportsPage();
+                    return;
+                }
+
                 /*
                  * 1. Study information
                  */
@@ -6336,8 +7577,30 @@
             } finally {
                 if (button) {
                     button.disabled = false;
+                    const latestCTScan =
+                        window.currentCTScanResult ||
+                        null;
+
+                    const latestCTSeriesId =
+                        currentCTSeriesId ||
+                        localStorage.getItem(
+                            "currentCTSeriesId"
+                        );
+
+                    const stillCTStudy =
+                        Boolean(
+                            latestCTSeriesId &&
+                            latestCTScan &&
+                            String(latestCTScan.series_id) ===
+                                String(latestCTSeriesId) &&
+                            String(latestCTScan.study_id) ===
+                                String(currentStudyId)
+                        );
+
                     button.textContent =
-                        "📄 Generate Final Report";
+                        stillCTStudy
+                            ? "📄 Generate CT Draft Report"
+                            : "📄 Generate Final Report";
                 }
             }
         }

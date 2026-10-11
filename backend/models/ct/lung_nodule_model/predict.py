@@ -2,7 +2,8 @@ import torch
 import torch.nn.functional as F
 from pathlib import Path
 
-from model import LungNodule3DCNN
+from .model import LungNodule3DCNN
+
 
 
 # Location of this model folder

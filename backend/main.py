@@ -1,4 +1,6 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi.responses import HTMLResponse
+from typing import Annotated
 from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
@@ -30,8 +32,10 @@ import numpy as np
 
 
 import sys
+import base64
 import json
 import os
+import threading
 import jwt
 import torch
 import SimpleITK as sitk
@@ -56,6 +60,21 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from ai.predict import predict_image
 from ai.xai import generate_gradcam
+
+# ============================================================
+# BREAST ULTRASOUND MODEL SERVICE
+# ============================================================
+BREAST_ULTRASOUND_MODEL_DIR = (
+    PROJECT_ROOT
+    / "backend"
+    / "models"
+    / "ultrasound"
+    / "breast_multitask_unet"
+)
+if str(BREAST_ULTRASOUND_MODEL_DIR) not in sys.path:
+    sys.path.insert(0, str(BREAST_ULTRASOUND_MODEL_DIR))
+
+from ultrasound_service import predict_breast_ultrasound
 # ============================================================
 # CT LUNG NODULE MODEL
 # ============================================================
@@ -73,38 +92,130 @@ CT_MODEL_FILE = (
     / "lung_nodule_3dcnn.pth"
 )
 
+CT_MODEL_NAME = "Lung Nodule 3D CNN"
+CT_MODEL_VERSION = "1.0"
+
+CT_CLASS_NAMES = {
+    0: "Non-nodule candidate",
+    1: "Nodule candidate",
+}
+
+CT_NODULE_THRESHOLD = 0.20
+CT_PATCH_SIZE = (32, 32, 32)
+CT_TARGET_SPACING = (1.0, 1.0, 1.0)
+CT_HU_MIN = -1000.0
+CT_HU_MAX = 400.0
+
 if str(CT_MODEL_DIR) not in sys.path:
     sys.path.insert(0, str(CT_MODEL_DIR))
 
 from model import LungNodule3DCNN
 
 
-ct_model = LungNodule3DCNN()
+def load_ct_model():
+    """
+    Load the trained 3D CT lung-nodule classifier.
 
-ct_checkpoint = torch.load(
-    CT_MODEL_FILE,
-    map_location="cpu",
-    weights_only=False
-)
+    The model expects:
+        [batch, channel, depth, height, width]
+        [1, 1, 32, 32, 32]
+    """
 
-if (
-    isinstance(ct_checkpoint, dict)
-    and "state_dict" in ct_checkpoint
-):
-    ct_checkpoint = ct_checkpoint["state_dict"]
+    if not CT_MODEL_FILE.exists():
+        raise FileNotFoundError(
+            f"CT model weights not found: {CT_MODEL_FILE}"
+        )
 
-ct_checkpoint = {
-    key.replace("module.", "", 1): value
-    for key, value in ct_checkpoint.items()
-}
+    model = LungNodule3DCNN(num_classes=2)
 
-ct_model.load_state_dict(ct_checkpoint)
+    checkpoint = torch.load(
+        CT_MODEL_FILE,
+        map_location="cpu",
+        weights_only=False
+    )
 
-ct_model.eval()
+    if isinstance(checkpoint, dict) and "state_dict" in checkpoint:
+        checkpoint = checkpoint["state_dict"]
 
-CT_NODULE_THRESHOLD = 0.20
+    if not isinstance(checkpoint, dict):
+        raise RuntimeError(
+            "CT model checkpoint does not contain a valid state_dict."
+        )
+
+    checkpoint = {
+        key.replace("module.", "", 1): value
+        for key, value in checkpoint.items()
+    }
+
+    model.load_state_dict(checkpoint)
+    model.eval()
+
+    return model
+
+
+ct_model = load_ct_model()
 
 print("CT lung nodule model loaded successfully.")
+
+
+def predict_ct_patch_array(patch: np.ndarray):
+    """
+    Classify one preprocessed 32x32x32 CT candidate patch.
+
+    The patch must already use the training preprocessing:
+        1 mm isotropic spacing
+        HU clipped to [-1000, 400]
+        normalized to [0, 1]
+
+    This is candidate-level classification. It does not detect
+    candidate locations in an entire CT scan.
+    """
+
+    patch = np.asarray(patch, dtype=np.float32)
+
+    if patch.shape != CT_PATCH_SIZE:
+        raise ValueError(
+            "Invalid CT patch shape. "
+            f"Expected {CT_PATCH_SIZE}, got {tuple(patch.shape)}."
+        )
+
+    if not np.isfinite(patch).all():
+        raise ValueError(
+            "CT patch contains NaN or infinite values."
+        )
+
+    patch_min = float(patch.min())
+    patch_max = float(patch.max())
+
+    if patch_min < 0.0 or patch_max > 1.0:
+        raise ValueError(
+            "CT patch values must be normalized to [0, 1]. "
+            f"Received range [{patch_min:.4f}, {patch_max:.4f}]."
+        )
+
+    model_input = torch.from_numpy(patch).float()
+    model_input = model_input.unsqueeze(0).unsqueeze(0)
+
+    with torch.no_grad():
+        logits = ct_model(model_input)
+        probabilities = torch.softmax(logits, dim=1)
+
+    probability_non_nodule = float(probabilities[0, 0].item())
+    probability_nodule = float(probabilities[0, 1].item())
+
+    prediction = (
+        1
+        if probability_nodule >= CT_NODULE_THRESHOLD
+        else 0
+    )
+
+    return {
+        "class_id": prediction,
+        "class": CT_CLASS_NAMES[prediction],
+        "probability_nodule": round(probability_nodule, 4),
+        "probability_non_nodule": round(probability_non_nodule, 4),
+        "threshold": CT_NODULE_THRESHOLD,
+    }
 
 
 # ==================================================
@@ -307,6 +418,15 @@ app.mount(
     StaticFiles(directory=str(XAI_OUTPUT_DIR)),
     name="xai_outputs"
 )
+
+CT_XAI_OUTPUT_DIR = UPLOAD_DIR / "ct_xai"
+CT_XAI_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+app.mount(
+    "/ct_xai",
+    StaticFiles(directory=str(CT_XAI_OUTPUT_DIR)),
+    name="ct_xai"
+)
+CT_XAI_LOCK = threading.Lock()
 
 CLASS_INDEX_MAP = {
     "Pneumonia": 0,
@@ -771,6 +891,11 @@ def generate_explanation_for_study(study_id: int):
                 prediction_status
             FROM ai_predictions
             WHERE study_id = ?
+              AND model_id IN (
+                  SELECT id
+                  FROM ai_models
+                  WHERE model_name = 'ResNet18 Medical 3-Class'
+              )
             ORDER BY id ASC
             """,
             (study_id,)
@@ -2315,6 +2440,51 @@ def get_abnormality(abnormality_id: int):
 
 
 # ==================================================
+# ============================================================
+# BREAST ULTRASOUND PREDICTION API
+# ============================================================
+
+BREAST_ULTRASOUND_ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png"}
+
+
+@app.post("/api/ultrasound/breast/predict")
+async def predict_breast_ultrasound_endpoint(file: UploadFile = File(...)):
+    """Run research breast-ultrasound inference on an uploaded image."""
+    original_name = file.filename or "ultrasound.png"
+    extension = Path(original_name).suffix.lower()
+    if extension not in BREAST_ULTRASOUND_ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Upload a JPG or PNG breast ultrasound image.")
+
+    temporary_path = UPLOAD_DIR / f"breast_ultrasound_{uuid.uuid4().hex}{extension}"
+    try:
+        with temporary_path.open("wb") as output_file:
+            shutil.copyfileobj(file.file, output_file)
+        result = predict_breast_ultrasound(str(temporary_path))
+
+        mask_array = np.asarray(result.pop("segmentation_mask"), dtype=np.uint8) * 255
+        mask_image = Image.fromarray(mask_array, mode="L")
+        from io import BytesIO
+        buffer = BytesIO()
+        mask_image.save(buffer, format="PNG")
+        result["segmentation_mask_png_base64"] = base64.b64encode(buffer.getvalue()).decode("ascii")
+        result["original_filename"] = Path(original_name).name
+        result["note"] = (
+            "Research output only. These results are not a diagnosis "
+            "and require qualified clinical review."
+        )
+        return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Breast ultrasound inference failed: {exc}") from exc
+    finally:
+        await file.close()
+        try:
+            temporary_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 
 
 # BASIC ENDPOINTS
@@ -2454,7 +2624,7 @@ def create_user_by_admin(
     user_data: AdminUserCreate,
     current_admin: dict = Depends(require_admin)
 ):
-    allowed_roles = ["Radiologist", "Technician"]
+    allowed_roles = ["Radiologist", "Clinician", "AI/ML Engineer"]
 
     if user_data.role not in allowed_roles:
         raise HTTPException(
@@ -3629,518 +3799,1162 @@ async def preprocess_image(file_id: str):
 
         )
 # ============================================================
-# CT DICOM SERIES UPLOAD
+# CT DICOM SERIES UPLOAD + PREPROCESSING + ANALYSIS
 # ============================================================
 
 CT_UPLOAD_DIR = UPLOAD_DIR / "ct"
+CT_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-CT_UPLOAD_DIR.mkdir(
-    parents=True,
-    exist_ok=True
-)
+
+def _ct_series_dir(series_id: str) -> Path:
+    if not series_id or Path(series_id).name != series_id:
+        raise HTTPException(status_code=400, detail="Invalid CT series ID")
+    return CT_UPLOAD_DIR / series_id
+
+
+def _load_ct_series_metadata(series_id: str) -> dict:
+    path = _ct_series_dir(series_id) / "series_metadata.json"
+    if not path.exists():
+        return {"series_id": series_id, "study_id": None}
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to read CT series metadata: {str(exc)}"
+        )
+
+
+def _save_ct_series_metadata(series_id: str, metadata: dict):
+    path = _ct_series_dir(series_id) / "series_metadata.json"
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(metadata, f, indent=2)
 
 
 @app.post("/api/ct/upload-series")
 async def upload_ct_series(
-    files: list[UploadFile] = File(...),
+    files: Annotated[list[UploadFile], File(...)],
     study_id: int | None = None
 ):
-    """
-    Upload a complete CT DICOM series.
-
-    A CT scan normally contains multiple DICOM slices.
-    This endpoint stores all uploaded .dcm files together
-    inside one unique CT series folder.
-
-    This endpoint only uploads the CT series.
-    CT preprocessing and AI prediction are separate steps.
-    """
-
+    """Upload and persist a complete CT DICOM series."""
     if not files:
-        raise HTTPException(
-            status_code=400,
-            detail="No CT DICOM files were uploaded"
-        )
-
-    # --------------------------------------------------
-    # Check study if study_id was supplied
-    # --------------------------------------------------
+        raise HTTPException(status_code=400, detail="No CT DICOM files were uploaded")
 
     connection = get_connection()
     cursor = connection.cursor()
+    series_dir = None
 
     try:
-
         if study_id is not None:
-
-            cursor.execute(
-                """
-                SELECT id
-                FROM studies
-                WHERE id = ?
-                """,
-                (study_id,)
-            )
-
-            study = cursor.fetchone()
-
-            if study is None:
-                raise HTTPException(
-                    status_code=404,
-                    detail="Study not found"
-                )
-
-        # --------------------------------------------------
-        # Create unique CT series ID
-        # --------------------------------------------------
+            cursor.execute("SELECT id FROM studies WHERE id = ?", (study_id,))
+            if cursor.fetchone() is None:
+                raise HTTPException(status_code=404, detail="Study not found")
 
         series_id = str(uuid.uuid4())
-
         series_dir = CT_UPLOAD_DIR / series_id
-
-        series_dir.mkdir(
-            parents=True,
-            exist_ok=True
-        )
+        series_dir.mkdir(parents=True, exist_ok=True)
 
         saved_files = []
 
-        # --------------------------------------------------
-        # Save every DICOM slice
-        # --------------------------------------------------
-
         for index, file in enumerate(files):
-
-            original_filename = (
-                file.filename
-                or f"slice_{index + 1}.dcm"
-            )
-
-            extension = Path(
-                original_filename
-            ).suffix.lower()
-
-            if extension != ".dcm":
-
+            original_filename = file.filename or f"slice_{index + 1}.dcm"
+            if Path(original_filename).suffix.lower() != ".dcm":
                 raise HTTPException(
                     status_code=400,
-                    detail=(
-                        "CT series can contain only "
-                        ".dcm DICOM files. "
-                        f"Invalid file: {original_filename}"
-                    )
+                    detail=f"CT series can contain only .dcm files: {original_filename}"
                 )
 
-            # Prevent unsafe folder names.
-            # We save using our own filename.
-            saved_filename = (
-                f"slice_{index + 1:04d}.dcm"
-            )
-
-            file_path = (
-                series_dir
-                / saved_filename
-            )
+            saved_filename = f"slice_{index + 1:04d}.dcm"
+            file_path = series_dir / saved_filename
 
             with file_path.open("wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
 
-                shutil.copyfileobj(
-                    file.file,
-                    buffer
-                )
+            saved_files.append({
+                "original_filename": original_filename,
+                "saved_filename": saved_filename,
+                "file_path": str(file_path),
+            })
 
-            saved_files.append(
-                {
-                    "original_filename":
-                        original_filename,
-
-                    "saved_filename":
-                        saved_filename,
-
-                    "file_path":
-                        str(file_path)
-                }
-            )
-
-        # --------------------------------------------------
-        # Commit database transaction
-        # --------------------------------------------------
+        _save_ct_series_metadata(
+            series_id,
+            {
+                "series_id": series_id,
+                "study_id": study_id,
+                "slice_count": len(saved_files),
+                "files": saved_files,
+                "status": "Uploaded",
+            },
+        )
 
         connection.commit()
 
         return {
             "success": True,
-
-            "message":
-                "CT DICOM series uploaded successfully",
-
-            "series_id":
-                series_id,
-
-            "study_id":
-                study_id,
-
-            "slice_count":
-                len(saved_files),
-
-            "series_directory":
-                str(series_dir),
-
-            "files":
-                saved_files,
-
-            "next_step":
-                "CT preprocessing"
+            "message": "CT DICOM series uploaded successfully",
+            "series_id": series_id,
+            "study_id": study_id,
+            "slice_count": len(saved_files),
+            "series_directory": str(series_dir),
+            "next_step": f"/api/ct/preprocess/{series_id}",
         }
 
     except HTTPException:
-
         connection.rollback()
-
-        # Remove partially uploaded series
-        if 'series_dir' in locals() and series_dir.exists():
-
-            shutil.rmtree(
-                series_dir,
-                ignore_errors=True
-            )
-
+        if series_dir is not None and series_dir.exists():
+            shutil.rmtree(series_dir, ignore_errors=True)
         raise
-
-    except Exception as e:
-
+    except Exception as exc:
         connection.rollback()
-
-        # Remove partially uploaded series
-        if 'series_dir' in locals() and series_dir.exists():
-
-            shutil.rmtree(
-                series_dir,
-                ignore_errors=True
-            )
-
+        if series_dir is not None and series_dir.exists():
+            shutil.rmtree(series_dir, ignore_errors=True)
         raise HTTPException(
             status_code=500,
-            detail=(
-                "CT series upload failed: "
-                f"{str(e)}"
-            )
+            detail=f"CT series upload failed: {str(exc)}"
         )
-
     finally:
-
         connection.close()
-# ============================================================
-# CT PREPROCESSING
-# ============================================================
+
 
 @app.post("/api/ct/preprocess/{series_id}")
 async def preprocess_ct_series(series_id: str):
     """
-    Preprocess an uploaded CT DICOM series.
-
-    Steps:
-    1. Load DICOM series
-    2. Resample to 1 mm isotropic spacing
-    3. Convert to Hounsfield Units
-    4. Clip HU to [-1000, 400]
-    5. Normalize to [0, 1]
-
-    This endpoint prepares the CT volume for the
-    later candidate-generation and AI-analysis stages.
+    DICOM -> 1 mm isotropic -> HU [-1000,400] -> [0,1].
+    Saves the complete preprocessed volume as ct_volume.npy.
     """
-
-    series_dir = CT_UPLOAD_DIR / series_id
+    series_dir = _ct_series_dir(series_id)
 
     if not series_dir.exists():
-        raise HTTPException(
-            status_code=404,
-            detail="CT series not found"
-        )
+        raise HTTPException(status_code=404, detail="CT series not found")
 
     try:
-
-        # --------------------------------------------------
-        # 1. Find DICOM files
-        # --------------------------------------------------
-
-        dicom_files = sorted(
-            series_dir.glob("*.dcm")
-        )
-
+        dicom_files = sorted(series_dir.glob("*.dcm"))
         if not dicom_files:
-            raise HTTPException(
-                status_code=400,
-                detail="No DICOM files found in CT series"
-            )
-
-        # --------------------------------------------------
-        # 2. Load DICOM series
-        # --------------------------------------------------
+            raise HTTPException(status_code=400, detail="No DICOM files found in CT series")
 
         reader = sitk.ImageSeriesReader()
+        series_ids = reader.GetGDCMSeriesIDs(str(series_dir))
 
-        series_file_names = (
-            reader.GetGDCMSeriesFileNames(
-                str(series_dir)
+        if series_ids:
+            series_file_names = reader.GetGDCMSeriesFileNames(
+                str(series_dir), series_ids[0]
             )
-        )
+        else:
+            series_file_names = [str(p) for p in dicom_files]
 
         if not series_file_names:
+            raise HTTPException(status_code=400, detail="Unable to read DICOM series")
 
-            # Fallback to the files saved by our uploader
-            series_file_names = [
-                str(path)
-                for path in dicom_files
-            ]
-
-        reader.SetFileNames(
-            series_file_names
-        )
-
+        reader.SetFileNames(series_file_names)
         ct_image = reader.Execute()
 
-        original_size = list(
-            ct_image.GetSize()
-        )
+        original_size = list(ct_image.GetSize())
+        original_spacing = list(ct_image.GetSpacing())
 
-        original_spacing = list(
-            ct_image.GetSpacing()
-        )
+        spacing = np.array(ct_image.GetSpacing(), dtype=np.float32)
+        size = np.array(ct_image.GetSize(), dtype=np.float32)
+        target = np.array(CT_TARGET_SPACING, dtype=np.float32)
 
-        # --------------------------------------------------
-        # 3. Resample to 1 mm isotropic spacing
-        # --------------------------------------------------
-
-        target_spacing = (
-            1.0,
-            1.0,
-            1.0
-        )
-
-        original_spacing_array = np.array(
-            ct_image.GetSpacing(),
-            dtype=np.float32
-        )
-
-        original_size_array = np.array(
-            ct_image.GetSize(),
-            dtype=np.float32
-        )
-
-        new_size = np.round(
-            original_size_array
-            * original_spacing_array
-            / np.array(
-                target_spacing,
-                dtype=np.float32
-            )
-        ).astype(int)
-
-        new_size = [
-            int(value)
-            for value in new_size
-        ]
+        new_size = np.maximum(
+            1,
+            np.round(size * spacing / target).astype(int)
+        ).tolist()
 
         resampler = sitk.ResampleImageFilter()
+        resampler.SetOutputSpacing(CT_TARGET_SPACING)
+        resampler.SetSize([int(x) for x in new_size])
+        resampler.SetOutputDirection(ct_image.GetDirection())
+        resampler.SetOutputOrigin(ct_image.GetOrigin())
+        resampler.SetTransform(sitk.Transform())
+        resampler.SetInterpolator(sitk.sitkLinear)
+        resampler.SetDefaultPixelValue(CT_HU_MIN)
 
-        resampler.SetOutputSpacing(
-            target_spacing
-        )
+        resampled = resampler.Execute(ct_image)
 
-        resampler.SetSize(
-            new_size
-        )
+        volume_hu = sitk.GetArrayFromImage(resampled).astype(np.float32)
+        volume_hu = np.clip(volume_hu, CT_HU_MIN, CT_HU_MAX)
+        volume = (
+            (volume_hu - CT_HU_MIN) /
+            (CT_HU_MAX - CT_HU_MIN)
+        ).astype(np.float32)
 
-        resampler.SetOutputDirection(
-            ct_image.GetDirection()
-        )
+        processed_dir = series_dir / "processed"
+        processed_dir.mkdir(parents=True, exist_ok=True)
 
-        resampler.SetOutputOrigin(
-            ct_image.GetOrigin()
-        )
+        volume_path = processed_dir / "ct_volume.npy"
+        np.save(volume_path, volume)
 
-        resampler.SetTransform(
-            sitk.Transform(),
-        )
+        series_metadata = _load_ct_series_metadata(series_id)
 
-        resampler.SetInterpolator(
-            sitk.sitkLinear
-        )
-
-        resampler.SetDefaultPixelValue(
-            -1000
-        )
-
-        resampled_image = (
-            resampler.Execute(ct_image)
-        )
-
-        # --------------------------------------------------
-        # 4. Convert to NumPy
-        # --------------------------------------------------
-
-        volume_hu = sitk.GetArrayFromImage(
-            resampled_image
-        ).astype(
-            np.float32
-        )
-
-        # --------------------------------------------------
-        # 5. Clip Hounsfield Units
-        # --------------------------------------------------
-
-        volume_hu = np.clip(
-            volume_hu,
-            -1000.0,
-            400.0
-        )
-
-        # --------------------------------------------------
-        # 6. Normalize to [0, 1]
-        # --------------------------------------------------
-
-        volume_normalized = (
-            volume_hu + 1000.0
-        ) / 1400.0
-
-        volume_normalized = (
-            volume_normalized.astype(
-                np.float32
-            )
-        )
-
-        # --------------------------------------------------
-        # 7. Create preprocessing directory
-        # --------------------------------------------------
-
-        processed_dir = (
-            series_dir / "processed"
-        )
-
-        processed_dir.mkdir(
-            parents=True,
-            exist_ok=True
-        )
-
-        volume_path = (
-            processed_dir
-            / "ct_volume.npy"
-        )
-
-        np.save(
-            volume_path,
-            volume_normalized
-        )
-
-        metadata = {
+        preprocessing_metadata = {
             "series_id": series_id,
+            "study_id": series_metadata.get("study_id"),
             "slice_count": len(dicom_files),
-
             "original_size": original_size,
             "original_spacing": original_spacing,
-
-            "resampled_size": list(
-                resampled_image.GetSize()
-            ),
-
-            "resampled_spacing": list(
-                resampled_image.GetSpacing()
-            ),
-
-            "volume_shape": list(
-                volume_normalized.shape
-            ),
-
-            "hu_clip_min": -1000.0,
-            "hu_clip_max": 400.0,
-
-            "normalized_min": float(
-                volume_normalized.min()
-            ),
-
-            "normalized_max": float(
-                volume_normalized.max()
-            ),
-
-            "volume_path": str(
-                volume_path
-            )
+            "resampled_size": list(resampled.GetSize()),
+            "resampled_spacing": list(resampled.GetSpacing()),
+            "volume_shape": list(volume.shape),
+            "target_spacing": list(CT_TARGET_SPACING),
+            "hu_clip_min": CT_HU_MIN,
+            "hu_clip_max": CT_HU_MAX,
+            "normalization": "[0,1]",
+            "volume_path": str(volume_path),
         }
 
-        metadata_path = (
-            processed_dir
-            / "metadata.json"
-        )
+        with (processed_dir / "metadata.json").open("w", encoding="utf-8") as f:
+            json.dump(preprocessing_metadata, f, indent=2)
 
-        with metadata_path.open(
-            "w",
-            encoding="utf-8"
-        ) as metadata_file:
-
-            json.dump(
-                metadata,
-                metadata_file,
-                indent=2
-            )
+        series_metadata.update({
+            "status": "Preprocessed",
+            "preprocessing": preprocessing_metadata,
+        })
+        _save_ct_series_metadata(series_id, series_metadata)
 
         return {
             "success": True,
-
-            "message":
-                "CT preprocessing completed successfully",
-
-            "series_id":
-                series_id,
-
+            "message": "CT preprocessing completed successfully",
+            "series_id": series_id,
+            "study_id": series_metadata.get("study_id"),
             "original": {
                 "size": original_size,
-                "spacing": original_spacing
+                "spacing": original_spacing,
             },
-
             "processed": {
-                "size": list(
-                    resampled_image.GetSize()
-                ),
-                "spacing": list(
-                    resampled_image.GetSpacing()
-                ),
-                "volume_shape": list(
-                    volume_normalized.shape
-                )
+                "size": list(resampled.GetSize()),
+                "spacing": list(resampled.GetSpacing()),
+                "volume_shape": list(volume.shape),
             },
-
             "normalization": {
-                "hu_min": -1000,
-                "hu_max": 400,
-                "min": float(
-                    volume_normalized.min()
-                ),
-                "max": float(
-                    volume_normalized.max()
-                )
+                "hu_min": CT_HU_MIN,
+                "hu_max": CT_HU_MAX,
+                "min": float(volume.min()),
+                "max": float(volume.max()),
             },
-
-            "volume_file":
-                str(volume_path),
-
-            "next_step":
-                "CT candidate generation and AI analysis"
+            "volume_file": str(volume_path),
+            "model_input": {
+                "shape": [1, 1, 32, 32, 32],
+                "patch_size": list(CT_PATCH_SIZE),
+                "channels": 1,
+            },
         }
 
     except HTTPException:
         raise
-
-    except Exception as e:
-
+    except Exception as exc:
         raise HTTPException(
             status_code=500,
-            detail=(
-                "CT preprocessing failed: "
-                f"{str(e)}"
-            )
+            detail=f"CT preprocessing failed: {str(exc)}"
         )
-# ==================================================
+
+
+class CTCandidate(BaseModel):
+    z: int
+    y: int
+    x: int
+
+
+class CTAnalyzeRequest(BaseModel):
+    candidates: list[CTCandidate]
+
+
+def _extract_ct_patch(volume: np.ndarray, z: int, y: int, x: int) -> np.ndarray:
+    half = 16
+    depth, height, width = volume.shape
+
+    z1, z2 = z - half, z + half
+    y1, y2 = y - half, y + half
+    x1, x2 = x - half, x + half
+
+    if z1 < 0 or y1 < 0 or x1 < 0 or z2 > depth or y2 > height or x2 > width:
+        raise ValueError(
+            "Candidate is too close to a volume boundary for a 32x32x32 patch."
+        )
+
+    patch = volume[z1:z2, y1:y2, x1:x2]
+
+    if patch.shape != CT_PATCH_SIZE:
+        raise ValueError(
+            f"Extracted patch has unexpected shape: {tuple(patch.shape)}"
+        )
+
+    return patch
+
+
+# Research candidate-proposal settings.
+# These values control a sliding-window proposal pass around the
+# existing candidate-level classifier; they are not medically validated
+# whole-CT detection parameters.
+CT_SCAN_STRIDE = 16
+CT_SCAN_BATCH_SIZE = 16
+CT_SCAN_MAX_CANDIDATES = 20
+CT_SCAN_SUPPRESSION_DISTANCE = 24.0
+
+
+def _predict_ct_patch_batch(patches: np.ndarray):
+    """
+    Run the trained candidate classifier on a batch of preprocessed
+    32x32x32 CT patches.
+
+    Input shape:
+        [N, 32, 32, 32]
+    """
+    patches = np.asarray(patches, dtype=np.float32)
+
+    if patches.ndim != 4 or tuple(patches.shape[1:]) != CT_PATCH_SIZE:
+        raise ValueError(
+            "Invalid CT patch batch shape. "
+            f"Expected [N, {CT_PATCH_SIZE[0]}, {CT_PATCH_SIZE[1]}, {CT_PATCH_SIZE[2]}], "
+            f"got {tuple(patches.shape)}."
+        )
+
+    if patches.shape[0] == 0:
+        return []
+
+    if not np.isfinite(patches).all():
+        raise ValueError("CT patch batch contains NaN or infinite values.")
+
+    patch_min = float(patches.min())
+    patch_max = float(patches.max())
+    if patch_min < 0.0 or patch_max > 1.0:
+        raise ValueError(
+            "CT patch values must be normalized to [0, 1]. "
+            f"Received range [{patch_min:.4f}, {patch_max:.4f}]."
+        )
+
+    model_input = torch.from_numpy(patches).float().unsqueeze(1)
+
+    with torch.no_grad():
+        logits = ct_model(model_input)
+        probabilities = torch.softmax(logits, dim=1).cpu().numpy()
+
+    predictions = []
+    for probability_non_nodule, probability_nodule in probabilities:
+        probability_non_nodule = float(probability_non_nodule)
+        probability_nodule = float(probability_nodule)
+        prediction = 1 if probability_nodule >= CT_NODULE_THRESHOLD else 0
+
+        predictions.append({
+            "class_id": prediction,
+            "class": CT_CLASS_NAMES[prediction],
+            "probability_nodule": round(probability_nodule, 4),
+            "probability_non_nodule": round(probability_non_nodule, 4),
+            "threshold": CT_NODULE_THRESHOLD,
+        })
+
+    return predictions
+
+
+def _scan_window_starts(length: int, patch_length: int, stride: int):
+    """Return starts that cover the full axis without partial patches."""
+    if length < patch_length:
+        return []
+
+    starts = list(range(0, length - patch_length + 1, stride))
+    last_start = length - patch_length
+    if starts[-1] != last_start:
+        starts.append(last_start)
+    return starts
+
+
+def _suppress_ct_candidates(candidates, distance_threshold: float):
+    """
+    Greedy 3D spatial suppression of overlapping/highly nearby proposals.
+
+    Candidates must already be sorted by descending nodule probability.
+    This is a research post-processing heuristic, not a clinical rule.
+    """
+    kept = []
+    threshold_sq = float(distance_threshold) ** 2
+
+    for candidate in candidates:
+        z, y, x = candidate["center"]["z"], candidate["center"]["y"], candidate["center"]["x"]
+
+        too_close = False
+        for existing in kept:
+            ez = existing["center"]["z"]
+            ey = existing["center"]["y"]
+            ex = existing["center"]["x"]
+            distance_sq = (
+                (z - ez) ** 2 +
+                (y - ey) ** 2 +
+                (x - ex) ** 2
+            )
+            if distance_sq <= threshold_sq:
+                too_close = True
+                break
+
+        if not too_close:
+            kept.append(candidate)
+
+    return kept
+
+
+def _get_or_create_ct_model_record(cursor):
+    cursor.execute(
+        """
+        SELECT id
+        FROM ai_models
+        WHERE model_name = ? AND version = ?
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (CT_MODEL_NAME, CT_MODEL_VERSION),
+    )
+    row = cursor.fetchone()
+
+    if row is not None:
+        return row["id"]
+
+    cursor.execute(
+        """
+        INSERT INTO ai_models (
+            model_name,
+            version,
+            model_path,
+            status
+        )
+        VALUES (?, ?, ?, ?)
+        """,
+        (
+            CT_MODEL_NAME,
+            CT_MODEL_VERSION,
+            str(CT_MODEL_FILE),
+            "Active",
+        ),
+    )
+    return cursor.lastrowid
+
+
+@app.post("/api/ct/scan/{series_id}")
+async def scan_ct_series(
+    series_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Research candidate-proposal pass over a preprocessed CT volume.
+
+    This endpoint slides a 32x32x32 window through the complete CT,
+    classifies each patch with the existing candidate-level 3D CNN,
+    retains patches at/above the configured nodule threshold, and
+    applies simple 3D spatial suppression to merge nearby proposals.
+
+    IMPORTANT:
+        This is not a clinically validated whole-CT nodule detector.
+        The trained model is a candidate-level classifier. Returned
+        locations are AI research candidates for further review.
+    """
+    series_dir = _ct_series_dir(series_id)
+
+    if not series_dir.exists():
+        raise HTTPException(status_code=404, detail="CT series not found")
+
+    volume_path = series_dir / "processed" / "ct_volume.npy"
+    if not volume_path.exists():
+        raise HTTPException(
+            status_code=400,
+            detail=f"Run /api/ct/preprocess/{series_id} before CT scanning."
+        )
+
+    try:
+        volume = np.load(volume_path, allow_pickle=False).astype(np.float32)
+
+        if volume.ndim != 3:
+            raise ValueError("Preprocessed CT volume must be 3-dimensional.")
+
+        depth, height, width = volume.shape
+        patch_depth, patch_height, patch_width = CT_PATCH_SIZE
+
+        z_starts = _scan_window_starts(depth, patch_depth, CT_SCAN_STRIDE)
+        y_starts = _scan_window_starts(height, patch_height, CT_SCAN_STRIDE)
+        x_starts = _scan_window_starts(width, patch_width, CT_SCAN_STRIDE)
+
+        if not z_starts or not y_starts or not x_starts:
+            raise ValueError(
+                "Preprocessed CT volume is smaller than the required 32x32x32 patch."
+            )
+
+        window_count = len(z_starts) * len(y_starts) * len(x_starts)
+
+        batch_patches = []
+        batch_centers = []
+        raw_candidates = []
+
+        def flush_batch():
+            if not batch_patches:
+                return
+
+            predictions = _predict_ct_patch_batch(np.stack(batch_patches, axis=0))
+
+            for center, prediction in zip(batch_centers, predictions):
+                if prediction["probability_nodule"] >= CT_NODULE_THRESHOLD:
+                    raw_candidates.append({
+                        "center": center,
+                        "patch_shape": list(CT_PATCH_SIZE),
+                        "prediction": prediction,
+                    })
+
+            batch_patches.clear()
+            batch_centers.clear()
+
+        for z1 in z_starts:
+            for y1 in y_starts:
+                for x1 in x_starts:
+                    patch = volume[
+                        z1:z1 + patch_depth,
+                        y1:y1 + patch_height,
+                        x1:x1 + patch_width,
+                    ]
+
+                    center = {
+                        "z": z1 + patch_depth // 2,
+                        "y": y1 + patch_height // 2,
+                        "x": x1 + patch_width // 2,
+                    }
+
+                    batch_patches.append(patch)
+                    batch_centers.append(center)
+
+                    if len(batch_patches) >= CT_SCAN_BATCH_SIZE:
+                        flush_batch()
+
+        flush_batch()
+
+        raw_candidates.sort(
+            key=lambda item: item["prediction"]["probability_nodule"],
+            reverse=True,
+        )
+
+        suppressed_candidates = _suppress_ct_candidates(
+            raw_candidates,
+            CT_SCAN_SUPPRESSION_DISTANCE,
+        )
+
+        final_candidates = suppressed_candidates[:CT_SCAN_MAX_CANDIDATES]
+
+        series_metadata = _load_ct_series_metadata(series_id)
+        study_id = series_metadata.get("study_id")
+
+        scan_payload = {
+            "series_id": series_id,
+            "study_id": study_id,
+            "task": "Research CT candidate proposal using sliding-window candidate classification",
+            "model": {
+                "name": CT_MODEL_NAME,
+                "version": CT_MODEL_VERSION,
+                "architecture": "LungNodule3DCNN",
+                "classes": CT_CLASS_NAMES,
+                "threshold": CT_NODULE_THRESHOLD,
+            },
+            "scan": {
+                "volume_shape": list(volume.shape),
+                "patch_size": list(CT_PATCH_SIZE),
+                "stride": CT_SCAN_STRIDE,
+                "batch_size": CT_SCAN_BATCH_SIZE,
+                "windows_evaluated": window_count,
+                "raw_candidates_above_threshold": len(raw_candidates),
+                "suppression_distance": CT_SCAN_SUPPRESSION_DISTANCE,
+                "max_returned_candidates": CT_SCAN_MAX_CANDIDATES,
+            },
+            "candidates": final_candidates,
+            "clinical_note": (
+                "AI research output only. This endpoint uses a candidate-level "
+                "classifier in a sliding-window proposal workflow and is not a "
+                "clinically validated whole-CT lung-nodule detector. A returned "
+                "candidate is not a confirmed nodule or cancer diagnosis."
+            ),
+        }
+
+        result_path = series_dir / "processed" / "ct_scan.json"
+        with result_path.open("w", encoding="utf-8") as f:
+            json.dump(scan_payload, f, indent=2)
+
+        return {
+            "success": True,
+            "series_id": series_id,
+            "study_id": study_id,
+            "task": scan_payload["task"],
+            "model": scan_payload["model"],
+            "scan": scan_payload["scan"],
+            "candidate_count": len(final_candidates),
+            "candidates": final_candidates,
+            "result_file": str(result_path),
+            "clinical_note": scan_payload["clinical_note"],
+        }
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"CT candidate scan failed: {str(exc)}"
+        )
+
+
+@app.post("/api/ct/analyze/{series_id}")
+async def analyze_ct_series(
+    series_id: str,
+    request: CTAnalyzeRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Classify supplied candidate locations.
+
+    The supplied 3D CNN is candidate-level, so this endpoint does
+    not falsely convert the entire CT into a normal/abnormal result.
+    Candidate locations must come from a detector or application.
+    """
+    series_dir = _ct_series_dir(series_id)
+
+    if not series_dir.exists():
+        raise HTTPException(status_code=404, detail="CT series not found")
+
+    if not request.candidates:
+        raise HTTPException(status_code=400, detail="At least one CT candidate is required")
+
+    volume_path = series_dir / "processed" / "ct_volume.npy"
+
+    if not volume_path.exists():
+        raise HTTPException(
+            status_code=400,
+            detail=f"Run /api/ct/preprocess/{series_id} before CT analysis."
+        )
+
+    try:
+        volume = np.load(volume_path, allow_pickle=False).astype(np.float32)
+
+        if volume.ndim != 3:
+            raise ValueError("Preprocessed CT volume must be 3-dimensional.")
+
+        results = []
+
+        for index, candidate in enumerate(request.candidates):
+            try:
+                patch = _extract_ct_patch(
+                    volume,
+                    candidate.z,
+                    candidate.y,
+                    candidate.x,
+                )
+                prediction = predict_ct_patch_array(patch)
+
+                results.append({
+                    "candidate_index": index,
+                    "center": {
+                        "z": candidate.z,
+                        "y": candidate.y,
+                        "x": candidate.x,
+                    },
+                    "patch_shape": list(patch.shape),
+                    "prediction": prediction,
+                })
+
+            except ValueError as exc:
+                results.append({
+                    "candidate_index": index,
+                    "center": {
+                        "z": candidate.z,
+                        "y": candidate.y,
+                        "x": candidate.x,
+                    },
+                    "error": str(exc),
+                })
+
+        valid_results = [r for r in results if "prediction" in r]
+
+        if not valid_results:
+            raise HTTPException(
+                status_code=400,
+                detail="No valid candidate patches could be extracted."
+            )
+
+        series_metadata = _load_ct_series_metadata(series_id)
+        study_id = series_metadata.get("study_id")
+
+        analysis_payload = {
+            "series_id": series_id,
+            "study_id": study_id,
+            "task": "Candidate-level lung nodule classification from 3D CT patches",
+            "model": {
+                "name": CT_MODEL_NAME,
+                "version": CT_MODEL_VERSION,
+                "architecture": "LungNodule3DCNN",
+                "classes": CT_CLASS_NAMES,
+                "threshold": CT_NODULE_THRESHOLD,
+            },
+            "results": valid_results,
+            "clinical_note": (
+                "AI research output only. A Nodule candidate is not a confirmed "
+                "nodule or cancer diagnosis. A Non-nodule candidate does not "
+                "establish that the entire CT scan is normal."
+            ),
+        }
+
+        result_path = series_dir / "processed" / "ct_analysis.json"
+        with result_path.open("w", encoding="utf-8") as f:
+            json.dump(analysis_payload, f, indent=2)
+
+        stored_predictions = []
+
+        if study_id is not None:
+            connection = get_connection()
+            cursor = connection.cursor()
+
+            try:
+                cursor.execute("SELECT id FROM studies WHERE id = ?", (study_id,))
+                if cursor.fetchone() is None:
+                    raise HTTPException(status_code=404, detail="Associated study not found")
+
+                model_id = _get_or_create_ct_model_record(cursor)
+
+                for result in valid_results:
+                    prediction = result["prediction"]
+
+                    cursor.execute(
+                        """
+                        INSERT INTO ai_predictions (
+                            study_id,
+                            model_id,
+                            abnormality,
+                            confidence_score,
+                            prediction_status
+                        )
+                        VALUES (?, ?, ?, ?, ?)
+                        """,
+                        (
+                            study_id,
+                            model_id,
+                            prediction["class"],
+                            prediction["probability_nodule"],
+                            "Completed",
+                        ),
+                    )
+
+                    stored_predictions.append({
+                        "prediction_id": cursor.lastrowid,
+                        "candidate_index": result["candidate_index"],
+                        "class": prediction["class"],
+                        "probability_nodule": prediction["probability_nodule"],
+                    })
+
+                connection.commit()
+
+            except HTTPException:
+                connection.rollback()
+                raise
+            except Exception:
+                connection.rollback()
+                raise
+            finally:
+                connection.close()
+
+        return {
+            "success": True,
+            "series_id": series_id,
+            "study_id": study_id,
+            "candidate_count": len(valid_results),
+            "results": valid_results,
+            "stored_predictions": stored_predictions,
+            "result_file": str(result_path),
+            "clinical_note": analysis_payload["clinical_note"],
+        }
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"CT analysis failed: {str(exc)}"
+        )
+
+
+@app.get("/api/ct/results/{series_id}")
+def get_ct_results(
+    series_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    series_dir = _ct_series_dir(series_id)
+
+    if not series_dir.exists():
+        raise HTTPException(status_code=404, detail="CT series not found")
+
+    result_path = series_dir / "processed" / "ct_analysis.json"
+
+    if not result_path.exists():
+        raise HTTPException(status_code=404, detail="No CT analysis results found")
+
+    try:
+        with result_path.open("r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to read CT results: {str(exc)}"
+        )
+
+
+
+# ============================================================
+# CT EXPLAINABILITY + TRIAGE
+# ============================================================
+
+def _load_ct_scan_payload(series_id: str) -> dict:
+    result_path = _ct_series_dir(series_id) / "processed" / "ct_scan.json"
+    if not result_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="Run the CT scan before requesting CT explanation or triage.",
+        )
+    try:
+        with result_path.open("r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to read CT scan results: {str(exc)}",
+        )
+
+
+def _calculate_ct_triage(scan_payload: dict) -> dict:
+    candidates = scan_payload.get("candidates") or []
+    if not candidates:
+        return {
+            "priority": "AI Inconclusive / Manual Review",
+            "reason": "No CT candidate exceeded the configured proposal threshold.",
+        }
+
+    top = candidates[0]
+    probability = float(
+        (top.get("prediction") or {}).get("probability_nodule", 0.0)
+    )
+
+    if probability >= 0.70:
+        priority = "High Priority"
+    elif probability >= 0.40:
+        priority = "Moderate Priority"
+    else:
+        priority = "Routine Review"
+
+    return {
+        "priority": priority,
+        "reason": (
+            f"The highest-ranked CT candidate has a model score of "
+            f"{probability * 100:.2f}%. The configured research workflow "
+            f"assigns {priority}. This is an operational review priority, "
+            f"not a medical diagnosis."
+        ),
+        "top_candidate": top.get("center"),
+        "top_probability": round(probability, 4),
+        "candidate_count": len(candidates),
+        "threshold": scan_payload.get("model", {}).get(
+            "threshold", CT_NODULE_THRESHOLD
+        ),
+    }
+
+
+def _generate_ct_gradcam_artifact(
+    volume: np.ndarray,
+    center: dict,
+    output_path: Path,
+    target_class: int = 1,
+):
+    patch = _extract_ct_patch(
+        volume, int(center["z"]), int(center["y"]), int(center["x"])
+    )
+
+    model_input = (
+        torch.from_numpy(patch.astype(np.float32))
+        .float()
+        .unsqueeze(0)
+        .unsqueeze(0)
+        .requires_grad_(True)
+    )
+
+    activations = {}
+    gradients = {}
+
+    def forward_hook(_module, _inputs, output):
+        activations["value"] = output
+
+    def backward_hook(_module, _grad_input, grad_output):
+        gradients["value"] = grad_output[0]
+
+    target_layer = getattr(ct_model, "features4", None)
+    if target_layer is None:
+        raise RuntimeError("CT model does not expose features4 for 3D Grad-CAM.")
+
+    with CT_XAI_LOCK:
+        forward_handle = target_layer.register_forward_hook(forward_hook)
+        backward_handle = target_layer.register_full_backward_hook(backward_hook)
+        try:
+            ct_model.zero_grad(set_to_none=True)
+            with torch.enable_grad():
+                logits = ct_model(model_input)
+                logits[0, target_class].backward()
+            activation = activations.get("value")
+            gradient = gradients.get("value")
+        finally:
+            forward_handle.remove()
+            backward_handle.remove()
+
+    if activation is None or gradient is None:
+        raise RuntimeError("Could not capture CT Grad-CAM activations/gradients.")
+
+    weights = gradient.mean(dim=(2, 3, 4), keepdim=True)
+    cam = torch.relu((weights * activation).sum(dim=1, keepdim=True))
+    cam = torch.nn.functional.interpolate(
+        cam, size=CT_PATCH_SIZE, mode="trilinear", align_corners=False
+    )
+    cam = cam[0, 0].detach().cpu().numpy()
+    cam -= float(cam.min())
+    cam_max = float(cam.max())
+    cam = cam / cam_max if cam_max > 1e-8 else np.zeros_like(cam)
+
+    local_z = CT_PATCH_SIZE[0] // 2
+    ct_slice = patch[local_z]
+    heat_slice = cam[local_z]
+
+    gray = np.clip(ct_slice * 255.0, 0, 255).astype(np.uint8)
+    gray_rgb = np.stack([gray, gray, gray], axis=-1)
+
+    heat_uint8 = np.clip(heat_slice * 255.0, 0, 255).astype(np.uint8)
+    heat_rgb = np.zeros_like(gray_rgb)
+    heat_rgb[..., 0] = heat_uint8
+    heat_rgb[..., 1] = (heat_uint8 * 0.45).astype(np.uint8)
+
+    alpha = (heat_slice * 0.70)[..., None]
+    overlay = (
+        gray_rgb.astype(np.float32) * (1.0 - alpha)
+        + heat_rgb.astype(np.float32) * alpha
+    ).clip(0, 255).astype(np.uint8)
+
+    base = Image.fromarray(gray_rgb, mode="RGB").resize(
+        (512, 512), Image.Resampling.NEAREST
+    )
+    overlay_image = Image.fromarray(overlay, mode="RGB").resize(
+        (512, 512), Image.Resampling.NEAREST
+    )
+
+    canvas = Image.new("RGB", (1024, 560), (15, 23, 42))
+    canvas.paste(base, (0, 48))
+    canvas.paste(overlay_image, (512, 48))
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    canvas.save(output_path, format="PNG")
+
+    probability = float(torch.softmax(logits, dim=1)[0, target_class].item())
+
+    return {
+        "method": "3D Grad-CAM",
+        "target_class": target_class,
+        "target_class_name": CT_CLASS_NAMES[target_class],
+        "probability": round(probability, 4),
+        "candidate_center": {
+            "z": int(center["z"]),
+            "y": int(center["y"]),
+            "x": int(center["x"]),
+        },
+        "slice_index_within_patch": local_z,
+        "patch_shape": list(CT_PATCH_SIZE),
+    }
+
+
+@app.post("/api/ct/explanation/{series_id}")
+def generate_ct_explanation(
+    series_id: str,
+    candidate_index: int = 0,
+    current_user: dict = Depends(get_current_user),
+):
+    scan_payload = _load_ct_scan_payload(series_id)
+    candidates = scan_payload.get("candidates") or []
+
+    if candidate_index < 0 or candidate_index >= len(candidates):
+        raise HTTPException(status_code=400, detail="Invalid CT candidate index.")
+
+    candidate = candidates[candidate_index]
+    center = candidate.get("center")
+    if not center:
+        raise HTTPException(status_code=400, detail="CT candidate has no center.")
+
+    volume_path = _ct_series_dir(series_id) / "processed" / "ct_volume.npy"
+    if not volume_path.exists():
+        raise HTTPException(status_code=400, detail="Preprocessed CT volume not found.")
+
+    try:
+        volume = np.load(volume_path, allow_pickle=False).astype(np.float32)
+        safe_name = f"candidate_{candidate_index + 1}_gradcam.png"
+        output_path = CT_XAI_OUTPUT_DIR / series_id / safe_name
+
+        xai = _generate_ct_gradcam_artifact(
+            volume, center, output_path, target_class=1
+        )
+        url = f"/ct_xai/{series_id}/{safe_name}"
+
+        metadata = {
+            "series_id": series_id,
+            "study_id": _load_ct_series_metadata(series_id).get("study_id"),
+            "candidate_index": candidate_index,
+            "method": "3D Grad-CAM",
+            "model_name": CT_MODEL_NAME,
+            "model_version": CT_MODEL_VERSION,
+            "candidate_center": center,
+            "explanation_url": url,
+            "clinical_note": (
+                "AI explanation only. The activation heatmap shows regions "
+                "that influenced the candidate-level model output. It does "
+                "not establish a nodule, cancer, or causal clinical finding."
+            ),
+        }
+
+        metadata_path = (
+            _ct_series_dir(series_id)
+            / "processed"
+            / f"ct_explanation_candidate_{candidate_index + 1}.json"
+        )
+        with metadata_path.open("w", encoding="utf-8") as f:
+            json.dump(metadata, f, indent=2)
+
+        return {
+            "success": True,
+            "series_id": series_id,
+            "study_id": metadata["study_id"],
+            "candidate_index": candidate_index,
+            "candidate": candidate,
+            "explanation": {**xai, "url": url},
+            "model": {
+                "name": CT_MODEL_NAME,
+                "version": CT_MODEL_VERSION,
+                "architecture": "LungNodule3DCNN",
+            },
+            "clinical_note": metadata["clinical_note"],
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"CT Grad-CAM generation failed: {str(exc)}",
+        )
+
+
+@app.get("/api/ct/triage/{series_id}")
+def get_ct_triage(
+    series_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    scan_payload = _load_ct_scan_payload(series_id)
+    return {
+        "success": True,
+        "series_id": series_id,
+        "study_id": _load_ct_series_metadata(series_id).get("study_id"),
+        "triage": _calculate_ct_triage(scan_payload),
+        "clinical_note": (
+            "Triage priority is an operational research workflow output. "
+            "It is not a medical diagnosis or a substitute for clinician review."
+        ),
+    }
+
+
+@app.post("/api/ct/triage/{series_id}")
+def create_ct_triage(
+    series_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    scan_payload = _load_ct_scan_payload(series_id)
+    triage = _calculate_ct_triage(scan_payload)
+    study_id = _load_ct_series_metadata(series_id).get("study_id")
+
+    if study_id is None:
+        raise HTTPException(status_code=400, detail="CT series has no study ID.")
+
+    connection = get_connection()
+    cursor = connection.cursor()
+    try:
+        cursor.execute("SELECT id FROM studies WHERE id = ?", (study_id,))
+        if cursor.fetchone() is None:
+            raise HTTPException(status_code=404, detail="Associated study not found.")
+
+        cursor.execute(
+            """
+            INSERT INTO triage_results (study_id, priority, reason)
+            VALUES (?, ?, ?)
+            """,
+            (study_id, triage["priority"], triage["reason"]),
+        )
+        triage_id = cursor.lastrowid
+        connection.commit()
+
+        return {
+            "success": True,
+            "triage_id": triage_id,
+            "series_id": series_id,
+            "study_id": study_id,
+            "triage": triage,
+            "clinical_note": (
+                "Triage is an operational research workflow output and requires "
+                "clinician review."
+            ),
+        }
+    except HTTPException:
+        connection.rollback()
+        raise
+    except Exception as exc:
+        connection.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to save CT triage: {str(exc)}",
+        )
+    finally:
+        connection.close()
+
+
+@app.post("/api/ct/predict-patch")
+async def predict_ct_patch(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user)
+):
+    """Classify an already-preprocessed 32x32x32 .npy CT patch."""
+    filename = file.filename or ""
+
+    if not filename.lower().endswith(".npy"):
+        raise HTTPException(status_code=400, detail="CT patch must be a .npy file")
+
+    try:
+        import io
+
+        patch = np.load(
+            io.BytesIO(await file.read()),
+            allow_pickle=False,
+        )
+
+        prediction = predict_ct_patch_array(patch)
+
+        return {
+            "success": True,
+            "model": {
+                "name": CT_MODEL_NAME,
+                "version": CT_MODEL_VERSION,
+                "architecture": "LungNodule3DCNN",
+            },
+            "input": {
+                "shape": list(np.asarray(patch).shape),
+                "expected_shape": list(CT_PATCH_SIZE),
+                "type": "preprocessed CT patch",
+            },
+            "prediction": prediction,
+            "clinical_note": (
+                "AI research output only. This model classifies a candidate "
+                "CT patch and does not establish a whole-CT diagnosis."
+            ),
+        }
+
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"CT prediction failed: {str(exc)}"
+        )
 
 
 # AI MODEL MANAGEMENT
@@ -5110,177 +5924,163 @@ def store_ai_prediction(
 
         connection.close()
 
+
 # ============================================================
-# CT LUNG NODULE PREDICTION
+# CT FOLDER UPLOAD PAGE
 # ============================================================
 
-@app.post("/api/ct/predict-patch")
-async def predict_ct_patch(
-    file: UploadFile = File(...),
-    current_user: dict = Depends(get_current_user)
-):
+@app.get("/ct-folder-upload", response_class=HTMLResponse)
+def ct_folder_upload_page():
     """
-    Run the trained CT lung-nodule classifier on a
-    preprocessed 32 x 32 x 32 NumPy patch.
+    Browser page for selecting and uploading an entire CT DICOM folder.
 
-    Expected input:
-        .npy file
-        shape = (32, 32, 32)
-        values normalized to approximately [0, 1]
-
-    This endpoint classifies a candidate patch.
-    It does NOT automatically detect nodules in an
-    entire CT scan.
+    The browser selects all files inside the chosen folder and sends
+    them as individual multipart files to the existing CT series
+    upload endpoint.
     """
-
-    filename = file.filename or ""
-
-    if not filename.lower().endswith(".npy"):
-        raise HTTPException(
-            status_code=400,
-            detail="CT patch must be a .npy file"
-        )
-
-    try:
-
-        # ----------------------------------------------------
-        # Read uploaded NumPy file
-        # ----------------------------------------------------
-
-        file_bytes = await file.read()
-
-        import io
-
-        patch = np.load(
-            io.BytesIO(file_bytes)
-        )
-
-        patch = patch.astype(
-            np.float32
-        )
-
-        # ----------------------------------------------------
-        # Validate shape
-        # ----------------------------------------------------
-
-        if patch.shape != (32, 32, 32):
-
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "message": (
-                        "Invalid CT patch shape. "
-                        "Expected (32, 32, 32)."
-                    ),
-                    "received_shape": list(
-                        patch.shape
-                    )
-                }
-            )
-
-        # ----------------------------------------------------
-        # Validate values
-        # ----------------------------------------------------
-
-        if not np.isfinite(patch).all():
-
-            raise HTTPException(
-                status_code=400,
-                detail="CT patch contains invalid numerical values"
-            )
-
-        # ----------------------------------------------------
-        # Prepare model input
-        # ----------------------------------------------------
-
-        model_input = torch.from_numpy(
-            patch
-        )
-
-        # batch dimension + channel dimension
-        model_input = model_input.unsqueeze(0)
-        model_input = model_input.unsqueeze(0)
-
-        # ----------------------------------------------------
-        # Run model
-        # ----------------------------------------------------
-
-        with torch.no_grad():
-
-            output = ct_model(
-                model_input
-            )
-
-            probabilities = torch.softmax(
-                output,
-                dim=1
-            )
-
-        probability_non_nodule = float(
-            probabilities[0, 0].item()
-        )
-
-        probability_nodule = float(
-            probabilities[0, 1].item()
-        )
-
-        # ----------------------------------------------------
-        # Apply configured threshold
-        # ----------------------------------------------------
-
-        prediction = (
-            1
-            if probability_nodule >= CT_NODULE_THRESHOLD
-            else 0
-        )
-
-        classification = (
-            "Nodule candidate"
-            if prediction == 1
-            else "Non-nodule candidate"
-        )
-
-        # ----------------------------------------------------
-        # Return result
-        # ----------------------------------------------------
-
-        return {
-            "success": True,
-
-            "model": {
-                "name": "Lung Nodule 3D CNN",
-                "version": "friend-trained-model"
-            },
-
-            "input": {
-                "shape": list(patch.shape),
-                "type": "preprocessed CT patch"
-            },
-
-            "prediction": {
-                "class_id": prediction,
-                "class": classification,
-                "probability_nodule": probability_nodule,
-                "probability_non_nodule": (
-                    probability_non_nodule
-                ),
-                "threshold": CT_NODULE_THRESHOLD
-            },
-
-            "clinical_note": (
-                "AI research output only. "
-                "This model classifies a candidate CT patch "
-                "and does not establish a medical diagnosis."
-            )
+    return """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CT DICOM Folder Upload</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 40px auto;
+            padding: 0 20px;
         }
+        .box {
+            border: 1px solid #ccc;
+            border-radius: 10px;
+            padding: 24px;
+        }
+        button {
+            margin-top: 16px;
+            padding: 10px 18px;
+            cursor: pointer;
+        }
+        #status {
+            margin-top: 20px;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+<body>
+    <div class="box">
+        <h1>CT DICOM Folder Upload</h1>
+        <p>Select the folder containing one complete CT DICOM series.</p>
+        <p><strong>Only .dcm files will be uploaded.</strong></p>
 
-    except HTTPException:
-        raise
+        <label>
+            Optional Study ID:
+            <input id="studyId" type="number" min="1" placeholder="Leave empty if not linked">
+        </label>
+        <br><br>
 
-    except Exception as e:
+        <input id="folderInput" type="file" webkitdirectory directory multiple>
+        <div id="fileCount">No folder selected.</div>
 
-        raise HTTPException(
-            status_code=500,
-            detail=f"CT prediction failed: {str(e)}"
-        )
+        <button id="uploadButton" type="button">Upload CT Folder</button>
+        <div id="status"></div>
+    </div>
+
+<script>
+const folderInput = document.getElementById("folderInput");
+const fileCount = document.getElementById("fileCount");
+const uploadButton = document.getElementById("uploadButton");
+const statusBox = document.getElementById("status");
+
+folderInput.addEventListener("change", () => {
+    const dcmFiles = Array.from(folderInput.files)
+        .filter(file => file.name.toLowerCase().endsWith(".dcm"));
+
+    fileCount.textContent = dcmFiles.length
+        ? `${dcmFiles.length} DICOM file(s) selected.`
+        : "No .dcm files found in the selected folder.";
+});
+
+uploadButton.addEventListener("click", async () => {
+    const dcmFiles = Array.from(folderInput.files)
+        .filter(file => file.name.toLowerCase().endsWith(".dcm"));
+
+    if (!dcmFiles.length) {
+        statusBox.textContent = "Please select a folder containing .dcm files.";
+        return;
+    }
+
+    const formData = new FormData();
+
+    dcmFiles.forEach(file => {
+        formData.append("files", file, file.name);
+    });
+
+    const studyId = document.getElementById("studyId").value.trim();
+    if (studyId) {
+        formData.append("study_id", studyId);
+    }
+
+    uploadButton.disabled = true;
+    statusBox.textContent = `Uploading ${dcmFiles.length} DICOM file(s)...`;
+
+    try {
+        const response = await fetch("/api/ct/upload-series", {
+            method: "POST",
+            body: formData
+        });
+
+        const data = await response.json();
+        statusBox.textContent = JSON.stringify(data, null, 2);
+
+        if (!response.ok) {
+            throw new Error(data.detail || "CT folder upload failed.");
+        }
+    } catch (error) {
+        statusBox.textContent = `Upload failed: ${error.message}`;
+    } finally {
+        uploadButton.disabled = false;
+    }
+});
+</script>
+</body>
+</html>
+"""
+
+
+# ============================================================
+# SWAGGER / OPENAPI FILE INPUT FIX
+# ============================================================
+
+from fastapi.openapi.utils import get_openapi
+
+
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+
+    schema = get_openapi(
+        title=app.title,
+        version=getattr(app, "version", "1.0.0"),
+        description=app.description,
+        routes=app.routes,
+    )
+
+    body_name = "Body_upload_ct_series_api_ct_upload_series_post"
+    body_schema = schema.get("components", {}).get("schemas", {}).get(body_name)
+
+    if body_schema:
+        files_schema = body_schema.get("properties", {}).get("files")
+        if files_schema:
+            files_schema["items"] = {
+                "type": "string",
+                "format": "binary"
+            }
+
+    app.openapi_schema = schema
+    return app.openapi_schema
+
+
+app.openapi = custom_openapi
 
