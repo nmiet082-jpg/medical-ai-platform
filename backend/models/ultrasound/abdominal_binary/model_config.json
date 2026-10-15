@@ -1,0 +1,29 @@
+{
+    "module_name": "abdominal_ultrasound",
+    "architecture": "EfficientNet-B0",
+    "pretrained_initialization": "ImageNet",
+    "input_size": [
+        224,
+        224
+    ],
+    "input_channels": 3,
+    "class_to_idx": {
+        "abnormal": 0,
+        "normal": 1
+    },
+    "normalization": {
+        "mean": [
+            0.485,
+            0.456,
+            0.406
+        ],
+        "std": [
+            0.229,
+            0.224,
+            0.225
+        ]
+    },
+    "supported_training_input": "RGB ultrasound images",
+    "intended_use": "Research-only binary ultrasound image classification",
+    "clinical_diagnosis_supported": false
+}

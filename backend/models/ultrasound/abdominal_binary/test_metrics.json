@@ -1,0 +1,26 @@
+{
+  "experiment": 4,
+  "checkpoint_epoch": 23,
+  "test_images": 525,
+  "accuracy": 0.781,
+  "balanced_accuracy": 0.7139,
+  "macro_f1": 0.7266,
+  "abnormal_precision": 0.6984,
+  "abnormal_recall": 0.5333,
+  "abnormal_f1": 0.6048,
+  "roc_auc": 0.8113,
+  "average_precision_abnormal": 0.6793,
+  "confusion_matrix": {
+    "actual_abnormal": {
+      "predicted_abnormal": 88,
+      "predicted_normal": 77
+    },
+    "actual_normal": {
+      "predicted_abnormal": 38,
+      "predicted_normal": 322
+    }
+  },
+  "dataset_split": "splits_v1",
+  "patient_level_independence_verified": false,
+  "external_clinical_validation_completed": false
+}

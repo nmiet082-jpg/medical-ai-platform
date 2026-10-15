@@ -1,47 +1,38 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, FileResponse
 from typing import Annotated
 from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 
-
 from database import get_connection, create_tables
 from security import verify_password, hash_password
 
-
 from fastapi.middleware.cors import CORSMiddleware
-
 
 from pathlib import Path
 
-
 from PIL import Image
-
 
 from pydantic import BaseModel
 
-
 import shutil
-
 
 import uuid
 
-
 import numpy as np
-
 
 import sys
 import base64
 import json
 import os
 import threading
+import tempfile
 import jwt
 import torch
 import SimpleITK as sitk
 
 from datetime import datetime, timedelta, timezone
-
 
 # --------------------------------------------------
 
@@ -49,14 +40,11 @@ from datetime import datetime, timedelta, timezone
 
 # --------------------------------------------------
 
-
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-
 
 if str(PROJECT_ROOT) not in sys.path:
 
     sys.path.insert(0, str(PROJECT_ROOT))
-
 
 from ai.predict import predict_image
 from ai.xai import generate_gradcam
@@ -75,6 +63,20 @@ if str(BREAST_ULTRASOUND_MODEL_DIR) not in sys.path:
     sys.path.insert(0, str(BREAST_ULTRASOUND_MODEL_DIR))
 
 from ultrasound_service import predict_breast_ultrasound
+# ============================================================
+# ABDOMINAL ULTRASOUND MODEL SERVICE
+# ============================================================
+ABDOMINAL_ULTRASOUND_MODEL_DIR = (
+    PROJECT_ROOT / "backend" / "models" / "ultrasound" / "abdominal_binary"
+)
+if not ABDOMINAL_ULTRASOUND_MODEL_DIR.is_dir():
+    raise RuntimeError(
+        f"Abdominal ultrasound model folder not found: {ABDOMINAL_ULTRASOUND_MODEL_DIR}"
+    )
+if str(ABDOMINAL_ULTRASOUND_MODEL_DIR) not in sys.path:
+    sys.path.insert(0, str(ABDOMINAL_ULTRASOUND_MODEL_DIR))
+
+from abdominal_service import predict_abdominal_ultrasound
 # ============================================================
 # CT LUNG NODULE MODEL
 # ============================================================
@@ -111,6 +113,43 @@ if str(CT_MODEL_DIR) not in sys.path:
 
 from model import LungNodule3DCNN
 
+# ============================================================
+# MRI MODEL SERVICE
+# ============================================================
+MRI_MODEL_DIR = PROJECT_ROOT / "backend" / "models" / "mri"
+
+if str(MRI_MODEL_DIR) not in sys.path:
+    sys.path.insert(0, str(MRI_MODEL_DIR))
+
+from inference import (
+    load_models as load_mri_models,
+    classify_image as classify_mri_image,
+    gradcam_overlay as gradcam_mri_overlay,
+)
+from preprocessing import (
+    MODALITIES as MRI_MODALITIES,
+    CLASS_NAMES as MRI_CLASS_NAMES,
+    SEGMENTATION_LABELS as MRI_SEGMENTATION_LABELS,
+    read_nifti_modalities,
+)
+
+_mri_models = None
+
+def get_mri_models():
+    """Load MRI checkpoints once per backend process."""
+    global _mri_models
+    if _mri_models is None:
+        required = (
+            MRI_MODEL_DIR / "classifier_best.pt",
+            MRI_MODEL_DIR / "segmentation_best_epoch10.pt",
+        )
+        missing = [str(path) for path in required if not path.is_file()]
+        if missing:
+            raise FileNotFoundError(
+                "MRI checkpoint file(s) missing: " + ", ".join(missing)
+            )
+        _mri_models = load_mri_models(MRI_MODEL_DIR)
+    return _mri_models
 
 def load_ct_model():
     """
@@ -152,11 +191,9 @@ def load_ct_model():
 
     return model
 
-
 ct_model = load_ct_model()
 
 print("CT lung nodule model loaded successfully.")
-
 
 def predict_ct_patch_array(patch: np.ndarray):
     """
@@ -217,7 +254,6 @@ def predict_ct_patch_array(patch: np.ndarray):
         "threshold": CT_NODULE_THRESHOLD,
     }
 
-
 # ==================================================
 # JWT AUTHENTICATION CONFIGURATION
 # ==================================================
@@ -231,7 +267,6 @@ JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
 bearer_scheme = HTTPBearer()
-
 
 def create_access_token(user_id: int, username: str, role: str):
     expiration = datetime.now(timezone.utc) + timedelta(
@@ -252,7 +287,6 @@ def create_access_token(user_id: int, username: str, role: str):
     )
 
     return token
-
 
 def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme)
@@ -298,7 +332,8 @@ def get_current_user(
                 username,
                 email,
                 role,
-                account_status
+                account_status,
+                patient_record_id
             FROM users
             WHERE id = ?
             """,
@@ -324,27 +359,50 @@ def get_current_user(
     finally:
         connection.close()
 
+# ==================================================
+# ROLE-BASED ACCESS CONTROL (RBAC)
+# Roles follow the project SRS.
+# Existing database accounts using "Admin" remain compatible.
+# ==================================================
+
+ROLE_ADMIN = "Administrator"
+ROLE_RADIOLOGIST = "Radiologist"
+ROLE_CLINICIAN = "Clinician"
+ROLE_AI_ENGINEER = "AI/ML Engineer"
+
+def normalize_role(role: str) -> str:
+    """Normalize the legacy administrator role without changing the database."""
+    return ROLE_ADMIN if role == "Admin" else role
+
+def require_roles(*allowed_roles: str):
+    """FastAPI dependency factory enforcing least-privilege role access."""
+    def role_checker(
+        current_user: dict = Depends(get_current_user)
+    ):
+        user_role = normalize_role(current_user.get("role", ""))
+        normalized_allowed = {normalize_role(role) for role in allowed_roles}
+
+        if user_role not in normalized_allowed:
+            raise HTTPException(
+                status_code=403,
+                detail="You do not have permission to perform this action."
+            )
+
+        return current_user
+
+    return role_checker
 
 def require_admin(
     current_user: dict = Depends(get_current_user)
 ):
-    if current_user["role"] != "Admin":
-        raise HTTPException(
-            status_code=403,
-            detail="Admin access required"
-        )
-
-    return current_user
-
+    """Compatibility dependency for existing administrator-only endpoints."""
+    return require_roles(ROLE_ADMIN)(current_user)
 
 # --------------------------------------------------
-
 
 # FastAPI Application
 
-
 # --------------------------------------------------
-
 
 app = FastAPI(
 
@@ -352,36 +410,36 @@ app = FastAPI(
 
     version="1.0.0"
 
-
 )
 
-
 # --------------------------------------------------
-
 
 # Create Database Tables
 
-
 # --------------------------------------------------
-
 
 create_tables()
 
-
 # --------------------------------------------------
-
 
 # CORS
 
-
 # --------------------------------------------------
-
 
 app.add_middleware(
 
     CORSMiddleware,
 
-    allow_origins=["*"],
+    allow_origins=[
+        # VS Code Live Server frontend
+        "http://localhost:5500",
+        "http://127.0.0.1:5500",
+        # Vite development frontend
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:5174",
+        "http://127.0.0.1:5174",
+    ],
 
     allow_credentials=True,
 
@@ -389,21 +447,15 @@ app.add_middleware(
 
     allow_headers=["*"],
 
-
 )
 
-
 # --------------------------------------------------
-
 
 # Upload Folder
 
-
 # --------------------------------------------------
 
-
 UPLOAD_DIR = Path("uploads")
-
 
 UPLOAD_DIR.mkdir(exist_ok=True)
 
@@ -413,20 +465,70 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 
 XAI_OUTPUT_DIR = Path("xai_outputs")
 XAI_OUTPUT_DIR.mkdir(exist_ok=True)
-app.mount(
-    "/xai_outputs",
-    StaticFiles(directory=str(XAI_OUTPUT_DIR)),
-    name="xai_outputs"
+CT_XAI_OUTPUT_DIR = PROJECT_ROOT / "uploads" / "ct_xai"
+CT_XAI_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+CT_XAI_LOCK = threading.Lock()
+
+# Explanation artifacts can contain patient-related imaging data.
+# Serve them only to authenticated clinical users or authorized engineers.
+CLINICAL_VIEW_ROLES = (
+    ROLE_ADMIN,
+    ROLE_RADIOLOGIST,
+)
+XAI_VIEW_ROLES = (
+    ROLE_ADMIN,
+    ROLE_RADIOLOGIST,
+    ROLE_AI_ENGINEER,
 )
 
-CT_XAI_OUTPUT_DIR = UPLOAD_DIR / "ct_xai"
-CT_XAI_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-app.mount(
-    "/ct_xai",
-    StaticFiles(directory=str(CT_XAI_OUTPUT_DIR)),
-    name="ct_xai"
-)
-CT_XAI_LOCK = threading.Lock()
+@app.get("/xai_outputs/{filename}")
+def get_xai_artifact(
+    filename: str,
+    _rbac_user: dict = Depends(require_roles(*XAI_VIEW_ROLES)),
+):
+    safe_name = Path(filename).name
+    artifact_path = (XAI_OUTPUT_DIR / safe_name).resolve()
+    if artifact_path.parent != XAI_OUTPUT_DIR.resolve() or not artifact_path.is_file():
+        raise HTTPException(status_code=404, detail="Explanation artifact not found")
+    return FileResponse(artifact_path)
+
+@app.get("/ct_xai/{filename}")
+def get_ct_xai_artifact(
+    filename: str,
+    _rbac_user: dict = Depends(require_roles(*XAI_VIEW_ROLES)),
+):
+    """Serve legacy CT explanation files saved directly in ct_xai/."""
+    safe_name = Path(filename).name
+    artifact_path = (CT_XAI_OUTPUT_DIR / safe_name).resolve()
+    if artifact_path.parent != CT_XAI_OUTPUT_DIR.resolve() or not artifact_path.is_file():
+        raise HTTPException(status_code=404, detail="CT explanation artifact not found")
+    return FileResponse(artifact_path)
+
+@app.get("/ct_xai/{series_id}/{filename}")
+def get_ct_xai_series_artifact(
+    series_id: str,
+    filename: str,
+    _rbac_user: dict = Depends(require_roles(*XAI_VIEW_ROLES)),
+):
+    """Serve a CT explanation saved under ct_xai/<series_id>/<filename>."""
+    safe_series_id = Path(series_id).name
+    safe_name = Path(filename).name
+    if safe_series_id != series_id or safe_name != filename:
+        raise HTTPException(status_code=404, detail="CT explanation artifact not found")
+
+    base_dir = CT_XAI_OUTPUT_DIR.resolve()
+    series_dir = (base_dir / safe_series_id).resolve()
+    artifact_path = (series_dir / safe_name).resolve()
+
+    # Keep the requested artifact inside this series' output directory.
+    if (
+        series_dir.parent != base_dir
+        or artifact_path.parent != series_dir
+        or not artifact_path.is_file()
+    ):
+        raise HTTPException(status_code=404, detail="CT explanation artifact not found")
+
+    return FileResponse(artifact_path)
 
 CLASS_INDEX_MAP = {
     "Pneumonia": 0,
@@ -434,15 +536,11 @@ CLASS_INDEX_MAP = {
     "Pneumothorax": 2
 }
 
-
 # --------------------------------------------------
-
 
 # Allowed File Types
 
-
 # --------------------------------------------------
-
 
 ALLOWED_EXTENSIONS = {
 
@@ -454,7 +552,6 @@ ALLOWED_EXTENSIONS = {
 
     ".dcm"
 
-
 }
 
 # ==================================================
@@ -465,23 +562,19 @@ class LoginRequest(BaseModel):
     username: str
     password: str
 
-
 class AdminUserCreate(BaseModel):
     full_name: str
     username: str
     email: str
     password: str
     role: str
-
+    patient_record_id: int | None = None
 
 # ==================================================
-
 
 # PATIENT MODEL
 
-
 # ==================================================
-
 
 class PatientCreate(BaseModel):
 
@@ -493,15 +586,11 @@ class PatientCreate(BaseModel):
 
     gender: str
 
-
 # ==================================================
-
 
 # STUDY MODEL
 
-
 # ==================================================
-
 
 class StudyCreate(BaseModel):
 
@@ -511,15 +600,11 @@ class StudyCreate(BaseModel):
 
     study_date: str
 
-
 # ==================================================
-
 
 # AI MODEL MANAGEMENT MODEL
 
-
 # ==================================================
-
 
 class AIModelCreate(BaseModel):
 
@@ -531,15 +616,11 @@ class AIModelCreate(BaseModel):
 
     status: str = "Registered"
 
-
 # ==================================================
-
 
 # AI PREDICTION STORAGE MODEL
 
-
 # ==================================================
-
 
 class AIPredictionCreate(BaseModel):
 
@@ -551,15 +632,11 @@ class AIPredictionCreate(BaseModel):
 
     prediction_status: str = "Completed"
 
-
 # ============================================================
-
 
 # XAI / EXPLANATION MANAGEMENT
 
-
 # ============================================================
-
 
 class ExplanationCreate(BaseModel):
 
@@ -573,17 +650,14 @@ class ExplanationCreate(BaseModel):
 
     metadata: str | None = None
 
-
 @app.post("/api/analysis/{study_id}/explanation")
-
 
 def create_explanation(
 
     study_id: int,
 
-    explanation: ExplanationCreate
-
-
+    explanation: ExplanationCreate,
+    _rbac_user: dict = Depends(require_roles('Administrator', 'Radiologist'))
 ):
 
     conn = get_connection()
@@ -722,11 +796,11 @@ def create_explanation(
 
     }
 
-
 @app.get("/api/analysis/{study_id}/explanation")
 
-
-def get_explanations(study_id: int):
+def get_explanations(study_id: int,
+    _rbac_user: dict = Depends(require_roles('Administrator', 'Radiologist'))
+):
 
     conn = get_connection()
 
@@ -810,19 +884,18 @@ def get_explanations(study_id: int):
 
     }
 
-
 # ==================================================
 
-
 # ============================================================
-
 
 # ============================================================
 # AUTOMATIC GRAD-CAM XAI GENERATION
 # ============================================================
 
 @app.post("/api/analysis/{study_id}/explanation/generate")
-def generate_explanation_for_study(study_id: int):
+def generate_explanation_for_study(study_id: int,
+    _rbac_user: dict = Depends(require_roles('Administrator', 'Radiologist'))
+):
 
     connection = get_connection()
     cursor = connection.cursor()
@@ -1187,9 +1260,7 @@ def calculate_triage(predictions):
     }
 # TRIAGE MANAGEMENT
 
-
 # ============================================================
-
 
 class TriageCreate(BaseModel):
 
@@ -1197,26 +1268,20 @@ class TriageCreate(BaseModel):
 
     reason: str | None = None
 
-
 # ------------------------------------------------------------
-
 
 # Create Triage Result
 
-
 # ------------------------------------------------------------
 
-
 @app.post("/api/analysis/{study_id}/triage")
-
 
 def create_triage(
 
     study_id: int,
 
-    triage: TriageCreate
-
-
+    triage: TriageCreate,
+    _rbac_user: dict = Depends(require_roles('Administrator', 'Radiologist'))
 ):
 
     allowed_priorities = [
@@ -1357,20 +1422,17 @@ def create_triage(
 
         connection.close()
 
-
 # ------------------------------------------------------------
-
 
 # Get Triage Result for a Study
 
-
 # ------------------------------------------------------------
-
 
 @app.get("/api/analysis/{study_id}/triage")
 
-
-def get_triage(study_id: int):
+def get_triage(study_id: int,
+    _rbac_user: dict = Depends(require_roles('Administrator', 'Radiologist'))
+):
 
     connection = get_connection()
 
@@ -1470,19 +1532,17 @@ def get_triage(study_id: int):
 
         connection.close()
 
-
 # ============================================================
-
 
 # CLINICIAN REVIEW MANAGEMENT
 
-
 # ============================================================
-
 
 class ClinicianReviewCreate(BaseModel):
 
-    clinician_name: str
+    # Kept optional for compatibility with older frontend clients.
+    # The server always uses the authenticated account identity.
+    clinician_name: str | None = None
 
     review_status: str = "Completed"
 
@@ -1490,25 +1550,21 @@ class ClinicianReviewCreate(BaseModel):
 
     comments: str | None = None
 
-
 # ------------------------------------------------------------
-
 
 # Create Clinician Review
 
-
 # ------------------------------------------------------------
 
-
 @app.post("/api/analysis/{study_id}/review")
-
 
 def create_clinician_review(
 
     study_id: int,
 
-    review: ClinicianReviewCreate
+    review: ClinicianReviewCreate,
 
+    current_user: dict = Depends(require_roles('Administrator', 'Radiologist'))
 
 ):
 
@@ -1640,7 +1696,7 @@ def create_clinician_review(
 
                 study_id,
 
-                review.clinician_name,
+                current_user["full_name"],
 
                 review.review_status,
 
@@ -1654,6 +1710,31 @@ def create_clinician_review(
 
         review_id = cursor.lastrowid
 
+        # Automatically record the clinician review in the audit log.
+        cursor.execute(
+            """
+            INSERT INTO audit_logs (
+                action,
+                entity_type,
+                entity_id,
+                performed_by,
+                details
+            )
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                "clinician_review_created",
+                "study",
+                str(study_id),
+                current_user["full_name"],
+                (
+                    f"Review ID {review_id}; "
+                    f"status={review.review_status}; "
+                    f"decision={review.final_decision}"
+                ),
+            ),
+        )
+
         connection.commit()
 
         return {
@@ -1664,7 +1745,7 @@ def create_clinician_review(
 
             "study_id": study_id,
 
-            "clinician_name": review.clinician_name,
+            "clinician_name": current_user["full_name"],
 
             "review_status": review.review_status,
 
@@ -1696,20 +1777,21 @@ def create_clinician_review(
 
         connection.close()
 
-
 # ------------------------------------------------------------
-
 
 # Get Clinician Reviews for a Study
 
-
 # ------------------------------------------------------------
-
 
 @app.get("/api/analysis/{study_id}/review")
 
+def get_clinician_reviews(
 
-def get_clinician_reviews(study_id: int):
+    study_id: int,
+
+    current_user: dict = Depends(require_roles('Administrator', 'Radiologist'))
+
+):
 
     connection = get_connection()
 
@@ -1805,15 +1887,11 @@ def get_clinician_reviews(study_id: int):
 
         connection.close()
 
-
 # ============================================================
-
 
 # REPORTS AND AUDIT LOGS MANAGEMENT
 
-
 # ============================================================
-
 
 class ReportCreate(BaseModel):
 
@@ -1822,7 +1900,6 @@ class ReportCreate(BaseModel):
     report_text: str | None = None
 
     generated_by: str | None = None
-
 
 class AuditLogCreate(BaseModel):
 
@@ -1836,26 +1913,20 @@ class AuditLogCreate(BaseModel):
 
     details: str | None = None
 
-
 # ------------------------------------------------------------
-
 
 # Create Report
 
-
 # ------------------------------------------------------------
 
-
 @app.post("/api/reports/{study_id}")
-
 
 def create_report(
 
     study_id: int,
 
-    report: ReportCreate
-
-
+    report: ReportCreate,
+    _rbac_user: dict = Depends(require_roles('Administrator'))
 ):
 
     allowed_statuses = [
@@ -1944,6 +2015,30 @@ def create_report(
 
         report_id = cursor.lastrowid
 
+        # Automatically record report creation in the audit log.
+        cursor.execute(
+            """
+            INSERT INTO audit_logs (
+                action,
+                entity_type,
+                entity_id,
+                performed_by,
+                details
+            )
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                "report_created",
+                "study",
+                str(study_id),
+                report.generated_by,
+                (
+                    f"Report ID {report_id}; "
+                    f"status={report.report_status}"
+                ),
+            ),
+        )
+
         connection.commit()
 
         return {
@@ -1984,20 +2079,17 @@ def create_report(
 
         connection.close()
 
-
 # ------------------------------------------------------------
-
 
 # Get Reports for a Study
 
-
 # ------------------------------------------------------------
-
 
 @app.get("/api/reports/{study_id}")
 
-
-def get_reports(study_id: int):
+def get_reports(study_id: int,
+    _rbac_user: dict = Depends(require_roles('Administrator', 'Radiologist'))
+):
 
     connection = get_connection()
 
@@ -2073,20 +2165,18 @@ def get_reports(study_id: int):
 
         connection.close()
 
-
 # ------------------------------------------------------------
-
 
 # Create Audit Log
 
-
 # ------------------------------------------------------------
-
 
 @app.post("/api/audit-logs")
 
-
-def create_audit_log(log: AuditLogCreate):
+def create_audit_log(
+    log: AuditLogCreate,
+    current_admin: dict = Depends(require_admin)
+):
 
     connection = get_connection()
 
@@ -2170,20 +2260,17 @@ def create_audit_log(log: AuditLogCreate):
 
         connection.close()
 
-
 # ------------------------------------------------------------
-
 
 # Get Audit Logs
 
-
 # ------------------------------------------------------------
-
 
 @app.get("/api/audit-logs")
 
-
-def get_audit_logs():
+def get_audit_logs(
+    current_admin: dict = Depends(require_admin)
+):
 
     connection = get_connection()
 
@@ -2233,21 +2320,15 @@ def get_audit_logs():
 
         connection.close()
 
-
 # ABNORMALITY MANAGEMENT
-
 
 # ==================================================
 
-
 # --------------------------------------------------
-
 
 # Abnormality Request Model
 
-
 # --------------------------------------------------
-
 
 class AbnormalityCreate(BaseModel):
 
@@ -2257,20 +2338,17 @@ class AbnormalityCreate(BaseModel):
 
     status: str = "Active"
 
-
 # --------------------------------------------------
-
 
 # Create Abnormality
 
-
 # --------------------------------------------------
-
 
 @app.post("/api/abnormalities")
 
-
-def create_abnormality(abnormality: AbnormalityCreate):
+def create_abnormality(abnormality: AbnormalityCreate,
+    _rbac_user: dict = Depends(require_roles('Administrator'))
+):
 
     connection = get_connection()
 
@@ -2342,20 +2420,17 @@ def create_abnormality(abnormality: AbnormalityCreate):
 
         connection.close()
 
-
 # --------------------------------------------------
-
 
 # Get All Abnormalities
 
-
 # --------------------------------------------------
-
 
 @app.get("/api/abnormalities")
 
-
-def get_abnormalities():
+def get_abnormalities(
+    _rbac_user: dict = Depends(require_roles('Administrator', 'Radiologist', 'AI/ML Engineer'))
+):
 
     connection = get_connection()
 
@@ -2387,20 +2462,17 @@ def get_abnormalities():
 
     }
 
-
 # --------------------------------------------------
-
 
 # Get One Abnormality
 
-
 # --------------------------------------------------
-
 
 @app.get("/api/abnormalities/{abnormality_id}")
 
-
-def get_abnormality(abnormality_id: int):
+def get_abnormality(abnormality_id: int,
+    _rbac_user: dict = Depends(require_roles('Administrator', 'Radiologist', 'AI/ML Engineer'))
+):
 
     connection = get_connection()
 
@@ -2438,7 +2510,6 @@ def get_abnormality(abnormality_id: int):
 
     return dict(row)
 
-
 # ==================================================
 # ============================================================
 # BREAST ULTRASOUND PREDICTION API
@@ -2446,9 +2517,10 @@ def get_abnormality(abnormality_id: int):
 
 BREAST_ULTRASOUND_ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 
-
 @app.post("/api/ultrasound/breast/predict")
-async def predict_breast_ultrasound_endpoint(file: UploadFile = File(...)):
+async def predict_breast_ultrasound_endpoint(file: UploadFile = File(...),
+    _rbac_user: dict = Depends(require_roles('Administrator', 'Radiologist', 'AI/ML Engineer'))
+):
     """Run research breast-ultrasound inference on an uploaded image."""
     original_name = file.filename or "ultrasound.png"
     extension = Path(original_name).suffix.lower()
@@ -2484,17 +2556,64 @@ async def predict_breast_ultrasound_endpoint(file: UploadFile = File(...)):
         except OSError:
             pass
 
+# ============================================================
+# ABDOMINAL ULTRASOUND PREDICTION API
+# ============================================================
+ABDOMINAL_ULTRASOUND_ALLOWED_EXTENSIONS = {
+    ".jpg", ".jpeg", ".png", ".bmp", ".webp"
+}
 
+@app.post("/api/ultrasound/abdominal/predict")
+async def predict_abdominal_ultrasound_endpoint(
+    file: UploadFile = File(...),
+    _rbac_user: dict = Depends(
+        require_roles("Administrator", "Radiologist", "AI/ML Engineer")
+    ),
+):
+    """Run research-only abdominal ultrasound classification."""
+    original_name = file.filename or "abdominal_ultrasound.png"
+    extension = Path(original_name).suffix.lower()
 
+    if extension not in ABDOMINAL_ULTRASOUND_ALLOWED_EXTENSIONS:
+        await file.close()
+        raise HTTPException(
+            status_code=400,
+            detail="Upload a JPG, JPEG, PNG, BMP, or WEBP abdominal ultrasound image.",
+        )
+
+    temporary_path = (
+        UPLOAD_DIR / f"abdominal_ultrasound_{uuid.uuid4().hex}{extension}"
+    )
+
+    try:
+        with temporary_path.open("wb") as output_file:
+            shutil.copyfileobj(file.file, output_file)
+
+        result = predict_abdominal_ultrasound(str(temporary_path))
+        result["original_filename"] = Path(original_name).name
+        return result
+
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Abdominal ultrasound inference failed: {exc}",
+        ) from exc
+    finally:
+        await file.close()
+        try:
+            temporary_path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 # BASIC ENDPOINTS
 
-
 # ==================================================
 
-
 @app.get("/")
-
 
 def root():
 
@@ -2506,9 +2625,7 @@ def root():
 
     }
 
-
 @app.get("/health")
-
 
 def health():
 
@@ -2517,7 +2634,6 @@ def health():
         "status": "healthy"
 
     }
-
 
 # ==================================================
 # AUTHENTICATION
@@ -2540,7 +2656,8 @@ def login_user(login: LoginRequest):
                 email,
                 password_hash,
                 role,
-                account_status
+                account_status,
+                patient_record_id
             FROM users
             WHERE username = ?
             """,
@@ -2591,13 +2708,13 @@ def login_user(login: LoginRequest):
                 "full_name": user["full_name"],
                 "username": user["username"],
                 "email": user["email"],
-                "role": user["role"]
+                "role": user["role"],
+                "patient_record_id": user["patient_record_id"]
             }
         }
 
     finally:
         connection.close()
-
 
 @app.get("/api/auth/me")
 def get_logged_in_user(
@@ -2610,10 +2727,10 @@ def get_logged_in_user(
             "full_name": current_user["full_name"],
             "username": current_user["username"],
             "email": current_user["email"],
-            "role": current_user["role"]
+            "role": current_user["role"],
+            "patient_record_id": current_user.get("patient_record_id")
         }
     }
-
 
 # ==================================================
 # ADMIN USER MANAGEMENT
@@ -2624,7 +2741,7 @@ def create_user_by_admin(
     user_data: AdminUserCreate,
     current_admin: dict = Depends(require_admin)
 ):
-    allowed_roles = ["Radiologist", "Clinician", "AI/ML Engineer"]
+    allowed_roles = ["Radiologist", "Technician", "Clinician", "AI/ML Engineer"]
 
     if user_data.role not in allowed_roles:
         raise HTTPException(
@@ -2657,6 +2774,18 @@ def create_user_by_admin(
         raise HTTPException(
             status_code=400,
             detail="Password must contain at least 8 characters"
+        )
+
+    # In this project, Clinician is the patient-facing login role.
+    if user_data.role == ROLE_CLINICIAN and not user_data.patient_record_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Select an existing patient record for a Clinician account"
+        )
+    if user_data.role != ROLE_CLINICIAN and user_data.patient_record_id is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="Only Clinician accounts can be linked to a patient record"
         )
 
     connection = get_connection()
@@ -2693,6 +2822,14 @@ def create_user_by_admin(
                 detail="Email already exists"
             )
 
+        if user_data.patient_record_id is not None:
+            cursor.execute("SELECT id FROM patients WHERE id = ?", (user_data.patient_record_id,))
+            if cursor.fetchone() is None:
+                raise HTTPException(status_code=404, detail="Selected patient record was not found")
+            cursor.execute("SELECT id FROM users WHERE patient_record_id = ?", (user_data.patient_record_id,))
+            if cursor.fetchone() is not None:
+                raise HTTPException(status_code=409, detail="This patient record is already linked to a login account")
+
         password_hash = hash_password(user_data.password)
 
         cursor.execute(
@@ -2705,9 +2842,10 @@ def create_user_by_admin(
                 role,
                 account_status,
                 email_verified,
-                failed_login_attempts
+                failed_login_attempts,
+                patient_record_id
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 user_data.full_name.strip(),
@@ -2717,7 +2855,8 @@ def create_user_by_admin(
                 user_data.role,
                 "ACTIVE",
                 1,
-                0
+                0,
+                user_data.patient_record_id
             )
         )
 
@@ -2736,7 +2875,8 @@ def create_user_by_admin(
                 "username": user_data.username.strip(),
                 "email": user_data.email.strip(),
                 "role": user_data.role,
-                "account_status": "ACTIVE"
+                "account_status": "ACTIVE",
+                "patient_record_id": user_data.patient_record_id
             }
         }
 
@@ -2777,7 +2917,8 @@ def get_admin_users(
                 account_status,
                 email_verified,
                 created_at,
-                updated_at
+                updated_at,
+                patient_record_id
             FROM users
             ORDER BY id DESC
             """
@@ -2799,30 +2940,86 @@ def get_admin_users(
     finally:
         connection.close()
 
-
-# ==================================================
 # ==================================================
 
+# ==================================================
+# CLINICIAN (PATIENT-FACING) DASHBOARD AND REPORT HISTORY
+# ==================================================
+
+@app.get("/api/clinician/me")
+def get_clinician_dashboard(current_user: dict = Depends(require_roles('Clinician'))):
+    patient_record_id = current_user.get("patient_record_id")
+    if not patient_record_id:
+        raise HTTPException(status_code=403, detail="This Clinician account is not linked to a patient record")
+
+    connection = get_connection()
+    try:
+        cursor = connection.cursor()
+        cursor.execute(
+            "SELECT id, patient_id, name, age, gender, created_at FROM patients WHERE id = ?",
+            (patient_record_id,)
+        )
+        patient = cursor.fetchone()
+        if patient is None:
+            raise HTTPException(status_code=404, detail="Linked patient record was not found")
+        cursor.execute("""
+            SELECT COUNT(*) AS report_count
+            FROM reports r
+            JOIN studies s ON s.id = r.study_id
+            WHERE s.patient_id = ?
+        """, (patient_record_id,))
+        report_count = cursor.fetchone()["report_count"]
+        return {"patient": dict(patient), "report_count": report_count}
+    finally:
+        connection.close()
+
+@app.get("/api/report-history")
+def get_report_history(current_user: dict = Depends(get_current_user)):
+    role = normalize_role(current_user.get("role", ""))
+    if role not in (ROLE_ADMIN, ROLE_RADIOLOGIST, ROLE_CLINICIAN):
+        raise HTTPException(status_code=403, detail="Your role is not permitted to view report history")
+    if role == ROLE_CLINICIAN and not current_user.get("patient_record_id"):
+        raise HTTPException(status_code=403, detail="This Clinician account is not linked to a patient record")
+
+    connection = get_connection()
+    try:
+        cursor = connection.cursor()
+        query = """
+            SELECT r.id AS report_id, p.patient_id AS patient_code, p.name AS patient_name,
+                   s.id AS study_id, s.study_type, s.study_date, r.report_status,
+                   r.created_at, r.report_text
+            FROM reports r
+            JOIN studies s ON s.id = r.study_id
+            JOIN patients p ON p.id = s.patient_id
+        """
+        params = ()
+        if role == ROLE_CLINICIAN:
+            query += " WHERE p.id = ?"
+            params = (current_user["patient_record_id"],)
+        query += " ORDER BY r.created_at DESC, r.id DESC"
+        cursor.execute(query, params)
+        reports = [dict(row) for row in cursor.fetchall()]
+        return {"count": len(reports), "reports": reports}
+    finally:
+        connection.close()
+
+# ==================================================
 
 # PATIENT MANAGEMENT
 
-
 # ==================================================
 
-
 # --------------------------------------------------
-
 
 # Create Patient
 
-
 # --------------------------------------------------
-
 
 @app.post("/api/patients")
 
-
-def create_patient(patient: PatientCreate):
+def create_patient(patient: PatientCreate,
+    _rbac_user: dict = Depends(require_roles('Administrator', 'Radiologist'))
+):
 
     connection = get_connection()
 
@@ -2890,20 +3087,17 @@ def create_patient(patient: PatientCreate):
 
         connection.close()
 
-
 # --------------------------------------------------
-
 
 # Get All Patients
 
-
 # --------------------------------------------------
-
 
 @app.get("/api/patients")
 
-
-def get_patients():
+def get_patients(
+    _rbac_user: dict = Depends(require_roles('Administrator', 'Radiologist'))
+):
 
     connection = get_connection()
 
@@ -2935,20 +3129,17 @@ def get_patients():
 
     }
 
-
 # --------------------------------------------------
-
 
 # Get One Patient
 
-
 # --------------------------------------------------
-
 
 @app.get("/api/patients/{patient_id}")
 
-
-def get_patient(patient_id: int):
+def get_patient(patient_id: int,
+    _rbac_user: dict = Depends(require_roles('Administrator', 'Radiologist'))
+):
 
     connection = get_connection()
 
@@ -2986,29 +3177,23 @@ def get_patient(patient_id: int):
 
     return dict(row)
 
-
 # ==================================================
-
 
 # STUDY MANAGEMENT
 
-
 # ==================================================
 
-
 # --------------------------------------------------
-
 
 # Create Study
 
-
 # --------------------------------------------------
-
 
 @app.post("/api/studies")
 
-
-def create_study(study: StudyCreate):
+def create_study(study: StudyCreate,
+    _rbac_user: dict = Depends(require_roles('Administrator', 'Radiologist'))
+):
 
     connection = get_connection()
 
@@ -3118,20 +3303,17 @@ def create_study(study: StudyCreate):
 
         connection.close()
 
-
 # --------------------------------------------------
-
 
 # Get All Studies
 
-
 # --------------------------------------------------
-
 
 @app.get("/api/studies")
 
-
-def get_studies():
+def get_studies(
+    _rbac_user: dict = Depends(require_roles('Administrator', 'Radiologist'))
+):
 
     connection = get_connection()
 
@@ -3181,26 +3363,21 @@ def get_studies():
 
     }
 
-
 # ==================================================
-
 
 # DATABASE IMAGE RECORDS
 
-
 # IMPORTANT:
-
 
 # This route must come BEFORE /api/studies/{study_id}
 
-
 # ==================================================
-
 
 @app.get("/api/studies/database")
 
-
-def get_database_images():
+def get_database_images(
+    _rbac_user: dict = Depends(require_roles('Administrator', 'Radiologist'))
+):
 
     connection = get_connection()
 
@@ -3232,20 +3409,17 @@ def get_database_images():
 
     }
 
-
 # --------------------------------------------------
-
 
 # Get One Study
 
-
 # --------------------------------------------------
-
 
 @app.get("/api/studies/{study_id}")
 
-
-def get_study(study_id: int):
+def get_study(study_id: int,
+    _rbac_user: dict = Depends(require_roles('Administrator', 'Radiologist'))
+):
 
     connection = get_connection()
 
@@ -3305,26 +3479,20 @@ def get_study(study_id: int):
 
     return dict(row)
 
-
 # ==================================================
-
 
 # MEDICAL IMAGE UPLOAD
 
-
 # ==================================================
 
-
 @app.post("/api/studies/upload")
-
 
 async def upload_study(
 
     file: UploadFile = File(...),
 
-    study_id: int | None = None
-
-
+    study_id: int | None = None,
+    _rbac_user: dict = Depends(require_roles('Administrator', 'Radiologist'))
 ):
 
     # Check file extension
@@ -3501,20 +3669,17 @@ async def upload_study(
 
         connection.close()
 
-
 # ==================================================
-
 
 # IMAGE VALIDATION
 
-
 # ==================================================
-
 
 @app.post("/api/studies/{file_id}/validate")
 
-
-def validate_image(file_id: str):
+def validate_image(file_id: str,
+    _rbac_user: dict = Depends(require_roles('Administrator', 'Radiologist', 'AI/ML Engineer'))
+):
 
     connection = get_connection()
 
@@ -3674,20 +3839,17 @@ def validate_image(file_id: str):
 
         }
 
-
 # ==================================================
-
 
 # IMAGE PREPROCESSING
 
-
 # ==================================================
-
 
 @app.post("/api/studies/{file_id}/preprocess")
 
-
-async def preprocess_image(file_id: str):
+async def preprocess_image(file_id: str,
+    _rbac_user: dict = Depends(require_roles('Administrator', 'Radiologist', 'AI/ML Engineer'))
+):
 
     matching_files = list(
 
@@ -3802,15 +3964,13 @@ async def preprocess_image(file_id: str):
 # CT DICOM SERIES UPLOAD + PREPROCESSING + ANALYSIS
 # ============================================================
 
-CT_UPLOAD_DIR = UPLOAD_DIR / "ct"
+CT_UPLOAD_DIR = PROJECT_ROOT / "uploads" / "ct"
 CT_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-
 
 def _ct_series_dir(series_id: str) -> Path:
     if not series_id or Path(series_id).name != series_id:
         raise HTTPException(status_code=400, detail="Invalid CT series ID")
     return CT_UPLOAD_DIR / series_id
-
 
 def _load_ct_series_metadata(series_id: str) -> dict:
     path = _ct_series_dir(series_id) / "series_metadata.json"
@@ -3825,17 +3985,16 @@ def _load_ct_series_metadata(series_id: str) -> dict:
             detail=f"Failed to read CT series metadata: {str(exc)}"
         )
 
-
 def _save_ct_series_metadata(series_id: str, metadata: dict):
     path = _ct_series_dir(series_id) / "series_metadata.json"
     with path.open("w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2)
 
-
 @app.post("/api/ct/upload-series")
 async def upload_ct_series(
     files: Annotated[list[UploadFile], File(...)],
-    study_id: int | None = None
+    study_id: int | None = None,
+    _rbac_user: dict = Depends(require_roles('Administrator', 'Radiologist', 'AI/ML Engineer'))
 ):
     """Upload and persist a complete CT DICOM series."""
     if not files:
@@ -3916,9 +4075,10 @@ async def upload_ct_series(
     finally:
         connection.close()
 
-
 @app.post("/api/ct/preprocess/{series_id}")
-async def preprocess_ct_series(series_id: str):
+async def preprocess_ct_series(series_id: str,
+    _rbac_user: dict = Depends(require_roles('Administrator', 'Radiologist', 'AI/ML Engineer'))
+):
     """
     DICOM -> 1 mm isotropic -> HU [-1000,400] -> [0,1].
     Saves the complete preprocessed volume as ct_volume.npy.
@@ -4048,16 +4208,13 @@ async def preprocess_ct_series(series_id: str):
             detail=f"CT preprocessing failed: {str(exc)}"
         )
 
-
 class CTCandidate(BaseModel):
     z: int
     y: int
     x: int
 
-
 class CTAnalyzeRequest(BaseModel):
     candidates: list[CTCandidate]
-
 
 def _extract_ct_patch(volume: np.ndarray, z: int, y: int, x: int) -> np.ndarray:
     half = 16
@@ -4081,7 +4238,6 @@ def _extract_ct_patch(volume: np.ndarray, z: int, y: int, x: int) -> np.ndarray:
 
     return patch
 
-
 # Research candidate-proposal settings.
 # These values control a sliding-window proposal pass around the
 # existing candidate-level classifier; they are not medically validated
@@ -4090,7 +4246,6 @@ CT_SCAN_STRIDE = 16
 CT_SCAN_BATCH_SIZE = 16
 CT_SCAN_MAX_CANDIDATES = 20
 CT_SCAN_SUPPRESSION_DISTANCE = 24.0
-
 
 def _predict_ct_patch_batch(patches: np.ndarray):
     """
@@ -4145,7 +4300,6 @@ def _predict_ct_patch_batch(patches: np.ndarray):
 
     return predictions
 
-
 def _scan_window_starts(length: int, patch_length: int, stride: int):
     """Return starts that cover the full axis without partial patches."""
     if length < patch_length:
@@ -4156,7 +4310,6 @@ def _scan_window_starts(length: int, patch_length: int, stride: int):
     if starts[-1] != last_start:
         starts.append(last_start)
     return starts
-
 
 def _suppress_ct_candidates(candidates, distance_threshold: float):
     """
@@ -4189,7 +4342,6 @@ def _suppress_ct_candidates(candidates, distance_threshold: float):
             kept.append(candidate)
 
     return kept
-
 
 def _get_or_create_ct_model_record(cursor):
     cursor.execute(
@@ -4226,11 +4378,10 @@ def _get_or_create_ct_model_record(cursor):
     )
     return cursor.lastrowid
 
-
 @app.post("/api/ct/scan/{series_id}")
 async def scan_ct_series(
     series_id: str,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(require_roles('Administrator', 'Radiologist', 'AI/ML Engineer'))
 ):
     """
     Research candidate-proposal pass over a preprocessed CT volume.
@@ -4391,12 +4542,11 @@ async def scan_ct_series(
             detail=f"CT candidate scan failed: {str(exc)}"
         )
 
-
 @app.post("/api/ct/analyze/{series_id}")
 async def analyze_ct_series(
     series_id: str,
     request: CTAnalyzeRequest,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(require_roles('Administrator', 'Radiologist', 'AI/ML Engineer'))
 ):
     """
     Classify supplied candidate locations.
@@ -4568,11 +4718,10 @@ async def analyze_ct_series(
             detail=f"CT analysis failed: {str(exc)}"
         )
 
-
 @app.get("/api/ct/results/{series_id}")
 def get_ct_results(
     series_id: str,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(require_roles('Administrator', 'Radiologist'))
 ):
     series_dir = _ct_series_dir(series_id)
 
@@ -4593,8 +4742,6 @@ def get_ct_results(
             detail=f"Failed to read CT results: {str(exc)}"
         )
 
-
-
 # ============================================================
 # CT EXPLAINABILITY + TRIAGE
 # ============================================================
@@ -4614,7 +4761,6 @@ def _load_ct_scan_payload(series_id: str) -> dict:
             status_code=500,
             detail=f"Failed to read CT scan results: {str(exc)}",
         )
-
 
 def _calculate_ct_triage(scan_payload: dict) -> dict:
     candidates = scan_payload.get("candidates") or []
@@ -4651,7 +4797,6 @@ def _calculate_ct_triage(scan_payload: dict) -> dict:
             "threshold", CT_NODULE_THRESHOLD
         ),
     }
-
 
 def _generate_ct_gradcam_artifact(
     volume: np.ndarray,
@@ -4758,12 +4903,11 @@ def _generate_ct_gradcam_artifact(
         "patch_shape": list(CT_PATCH_SIZE),
     }
 
-
 @app.post("/api/ct/explanation/{series_id}")
 def generate_ct_explanation(
     series_id: str,
     candidate_index: int = 0,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_roles('Administrator', 'Radiologist')),
 ):
     scan_payload = _load_ct_scan_payload(series_id)
     candidates = scan_payload.get("candidates") or []
@@ -4836,11 +4980,10 @@ def generate_ct_explanation(
             detail=f"CT Grad-CAM generation failed: {str(exc)}",
         )
 
-
 @app.get("/api/ct/triage/{series_id}")
 def get_ct_triage(
     series_id: str,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_roles('Administrator', 'Radiologist')),
 ):
     scan_payload = _load_ct_scan_payload(series_id)
     return {
@@ -4854,11 +4997,10 @@ def get_ct_triage(
         ),
     }
 
-
 @app.post("/api/ct/triage/{series_id}")
 def create_ct_triage(
     series_id: str,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_roles('Administrator', 'Radiologist')),
 ):
     scan_payload = _load_ct_scan_payload(series_id)
     triage = _calculate_ct_triage(scan_payload)
@@ -4907,11 +5049,10 @@ def create_ct_triage(
     finally:
         connection.close()
 
-
 @app.post("/api/ct/predict-patch")
 async def predict_ct_patch(
     file: UploadFile = File(...),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(require_roles('Administrator', 'Radiologist', 'AI/ML Engineer'))
 ):
     """Classify an already-preprocessed 32x32x32 .npy CT patch."""
     filename = file.filename or ""
@@ -4956,17 +5097,15 @@ async def predict_ct_patch(
             detail=f"CT prediction failed: {str(exc)}"
         )
 
-
 # AI MODEL MANAGEMENT
-
 
 # ==================================================
 
-
 @app.post("/api/models")
 
-
-def create_ai_model(model: AIModelCreate):
+def create_ai_model(model: AIModelCreate,
+    _rbac_user: dict = Depends(require_roles('Administrator', 'AI/ML Engineer'))
+):
 
     connection = get_connection()
 
@@ -5078,11 +5217,11 @@ def create_ai_model(model: AIModelCreate):
 
         connection.close()
 
-
 @app.get("/api/models")
 
-
-def get_ai_models():
+def get_ai_models(
+    _rbac_user: dict = Depends(require_roles('Administrator', 'AI/ML Engineer'))
+):
 
     connection = get_connection()
 
@@ -5130,11 +5269,11 @@ def get_ai_models():
 
         connection.close()
 
-
 @app.get("/api/models/{model_id}")
 
-
-def get_ai_model(model_id: int):
+def get_ai_model(model_id: int,
+    _rbac_user: dict = Depends(require_roles('Administrator', 'AI/ML Engineer'))
+):
 
     connection = get_connection()
 
@@ -5188,37 +5327,29 @@ def get_ai_model(model_id: int):
 
         connection.close()
 
-
 # ==================================================
-
 
 # AI ANALYSIS / PREDICTION STRUCTURE
 
-
 # ==================================================
-
 
 #
 
-
 # IMPORTANT:
-
 
 # This endpoint prepares the backend for the real AI model.
 
-
 # It does NOT create or invent a medical prediction.
-
 
 # The trained model will be connected in a later step.
 
-
 # ==================================================
-
 
 @app.post("/api/analysis/{study_id}")
 
-def run_ai_analysis(study_id: int):
+def run_ai_analysis(study_id: int,
+    _rbac_user: dict = Depends(require_roles('Administrator', 'Radiologist', 'AI/ML Engineer'))
+):
 
     connection = get_connection()
 
@@ -5612,11 +5743,11 @@ def run_ai_analysis(study_id: int):
 
         connection.close()
 
-
 @app.get("/api/analysis/{study_id}")
 
-
-def get_ai_analysis(study_id: int):
+def get_ai_analysis(study_id: int,
+    _rbac_user: dict = Depends(require_roles('Administrator', 'Radiologist'))
+):
 
     connection = get_connection()
 
@@ -5720,44 +5851,32 @@ def get_ai_analysis(study_id: int):
 
         connection.close()
 
-
 # ==================================================
-
 
 # AI PREDICTION RECORD MANAGEMENT
 
-
 # ==================================================
-
 
 #
 
-
 # IMPORTANT:
-
 
 # This endpoint stores a prediction produced by the real AI model.
 
-
 # It must NOT be used to invent or manually create medical predictions.
-
 
 # The real model integration will call this logic in a later step.
 
-
 # ==================================================
 
-
 @app.post("/api/analysis/{study_id}/predictions")
-
 
 def store_ai_prediction(
 
     study_id: int,
 
-    prediction: AIPredictionCreate
-
-
+    prediction: AIPredictionCreate,
+    _rbac_user: dict = Depends(require_roles('Administrator', 'Radiologist', 'AI/ML Engineer'))
 ):
 
     if prediction.confidence_score < 0 or prediction.confidence_score > 1:
@@ -5924,7 +6043,6 @@ def store_ai_prediction(
 
         connection.close()
 
-
 # ============================================================
 # CT FOLDER UPLOAD PAGE
 # ============================================================
@@ -6048,13 +6166,11 @@ uploadButton.addEventListener("click", async () => {
 </html>
 """
 
-
 # ============================================================
 # SWAGGER / OPENAPI FILE INPUT FIX
 # ============================================================
 
 from fastapi.openapi.utils import get_openapi
-
 
 def custom_openapi():
     if app.openapi_schema:
@@ -6081,6 +6197,251 @@ def custom_openapi():
     app.openapi_schema = schema
     return app.openapi_schema
 
-
 app.openapi = custom_openapi
+
+# ============================================================
+# MRI 2D IMAGE CLASSIFICATION API (research inference)
+# ============================================================
+
+@app.post("/api/mri/classify-image")
+async def classify_mri_2d_image(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(require_roles('Administrator', 'Radiologist', 'AI/ML Engineer')),
+):
+    """Classify one PNG/JPG/JPEG brain MRI image with the trained 2D classifier."""
+    from io import BytesIO
+
+    filename = (file.filename or "").lower()
+    allowed_extensions = (".png", ".jpg", ".jpeg")
+    if not filename.endswith(allowed_extensions):
+        raise HTTPException(
+            status_code=400,
+            detail="Upload one brain MRI image in .png, .jpg, or .jpeg format.",
+        )
+
+    try:
+        raw = await file.read()
+        if not raw:
+            raise HTTPException(status_code=400, detail="The uploaded image is empty.")
+        if len(raw) > 15 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="Image exceeds the 15 MB upload limit.")
+
+        try:
+            with Image.open(BytesIO(raw)) as probe:
+                if probe.format not in {"PNG", "JPEG"}:
+                    raise HTTPException(status_code=400, detail="The file content is not a PNG or JPEG image.")
+                if getattr(probe, "n_frames", 1) != 1:
+                    raise HTTPException(status_code=400, detail="Only single-frame images are supported.")
+                probe.verify()
+            with Image.open(BytesIO(raw)) as source_image:
+                image = source_image.convert("RGB")
+        except HTTPException:
+            raise
+        except Exception as image_error:
+            raise HTTPException(status_code=400, detail="The uploaded file is not a readable image.") from image_error
+
+        classifier, _segmentation, classifier_ckpt, _seg_ckpt, device = get_mri_models()
+        result = classify_mri_image(
+            classifier,
+            image,
+            device,
+            image_size=int(classifier_ckpt.get("image_size", 224)),
+        )
+
+        # Generate Grad-CAM from the same 2D classifier prediction.
+        # Return PNGs as base64 so the frontend can display them without another endpoint.
+        import base64
+        from io import BytesIO
+
+        cam_image = gradcam_mri_overlay(
+            classifier,
+            result["tensor"],
+            int(result["class_index"]),
+            image,
+            device,
+        )
+        cam_buffer = BytesIO()
+        cam_image.save(cam_buffer, format="PNG")
+        cam_base64 = base64.b64encode(cam_buffer.getvalue()).decode("ascii")
+
+        original_buffer = BytesIO()
+        image.resize((224, 224)).save(original_buffer, format="PNG")
+        original_base64 = base64.b64encode(original_buffer.getvalue()).decode("ascii")
+
+        return {
+            "message": "2D MRI research classification completed.",
+            "input_filename": Path(file.filename or "uploaded_image").name,
+            "predicted_class": result["predicted_class"],
+            "score_not_calibrated": result["score"],
+            "probabilities": result["probabilities"],
+            "original_image_png_base64": original_base64,
+            "gradcam_overlay_png_base64": cam_base64,
+            "gradcam_target_class": result["predicted_class"],
+            "model": "ResNet-18 2D brain MRI classifier",
+            "model_device": str(device),
+            "note": (
+                "Research output only. This classifier is intended for brain MRI images in its "
+                "training domain, is not clinically validated, and must not be used as a diagnosis. "
+                "Scores are not calibrated probabilities; qualified clinician review is required."
+            ),
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        print(f"2D MRI classification failed: {type(exc).__name__}: {exc}")
+        raise HTTPException(
+            status_code=500,
+            detail="2D MRI classification failed. Check the backend terminal for details.",
+        ) from exc
+    finally:
+        await file.close()
+
+# ============================================================
+# MRI 3D SEGMENTATION API (research inference)
+# ============================================================
+
+@app.post("/api/mri/segment")
+async def segment_mri_volume(
+    flair: UploadFile = File(...),
+    t1: UploadFile = File(...),
+    t1ce: UploadFile = File(...),
+    t2: UploadFile = File(...),
+    study_id: int | None = None,
+    current_user: dict = Depends(require_roles('Administrator', 'Radiologist', 'AI/ML Engineer')),
+):
+    """Run research segmentation on FLAIR, T1, T1ce and T2 NIfTI volumes."""
+    uploads = [("flair", flair), ("t1", t1), ("t1ce", t1ce), ("t2", t2)]
+    connection = None
+
+    try:
+        # Validate extensions before processing. Do not accept arbitrary files.
+        for modality, upload in uploads:
+            filename = (upload.filename or "").lower()
+            if not (filename.endswith(".nii") or filename.endswith(".nii.gz")):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{modality.upper()} must be a NIfTI file (.nii or .nii.gz).",
+                )
+
+        if study_id is not None:
+            connection = get_connection()
+            cursor = connection.cursor()
+            cursor.execute("SELECT id FROM studies WHERE id = ?", (study_id,))
+            if cursor.fetchone() is None:
+                raise HTTPException(status_code=404, detail="Study not found.")
+
+        # Temporary files are deleted automatically when inference finishes.
+        with tempfile.TemporaryDirectory(prefix="mri_") as temp_dir:
+            temp_dir = Path(temp_dir)
+            nifti_paths = []
+            for modality, upload in uploads:
+                filename = (upload.filename or "").lower()
+                suffix = ".nii.gz" if filename.endswith(".nii.gz") else ".nii"
+                destination = temp_dir / f"{modality}{suffix}"
+                with destination.open("wb") as output_file:
+                    shutil.copyfileobj(upload.file, output_file)
+                nifti_paths.append(destination)
+
+            image_tensor = read_nifti_modalities(nifti_paths)
+            classifier, segmentation, classifier_ckpt, seg_ckpt, device = get_mri_models()
+
+            with torch.no_grad():
+                outputs = segmentation(image_tensor.unsqueeze(0).to(device))
+                if not isinstance(outputs, (tuple, list)) or len(outputs) < 2:
+                    raise RuntimeError("Unexpected MRI segmentation model output.")
+                segmentation_logits, auxiliary_logits = outputs[0], outputs[1]
+                predicted_mask = torch.argmax(segmentation_logits, dim=1)[0].cpu().numpy()
+                probabilities = torch.softmax(auxiliary_logits, dim=1)[0].cpu().numpy()
+
+            voxel_counts = {
+                str(label): int(np.count_nonzero(predicted_mask == label))
+                for label in range(len(MRI_SEGMENTATION_LABELS))
+            }
+
+            # Create preview images from the model output for the browser UI.
+            # This is a center slice of the model's cropped inference tensor, not
+            # a reconstructed full-volume clinical segmentation.
+            from io import BytesIO
+
+            slice_index = int(predicted_mask.shape[0] // 2)
+            flair_slice = np.asarray(image_tensor[0, slice_index].cpu().numpy(), dtype=np.float32)
+            finite_values = flair_slice[np.isfinite(flair_slice)]
+            if finite_values.size:
+                low, high = np.percentile(finite_values, [1, 99])
+                if high <= low:
+                    high = low + 1.0
+                grayscale = np.clip((flair_slice - low) / (high - low), 0, 1)
+            else:
+                grayscale = np.zeros_like(flair_slice, dtype=np.float32)
+            gray_u8 = (grayscale * 255).astype(np.uint8)
+            flair_preview = Image.fromarray(gray_u8, mode="L").convert("RGB")
+
+            # Colors are only a visualization key for the model's label IDs.
+            label_colors = {
+                1: (255, 90, 90),   # label 1: NCR/NET
+                2: (60, 180, 255),  # label 2: edema
+                3: (255, 210, 60),  # label 3: enhancing tumor
+            }
+            mask_slice = np.asarray(predicted_mask[slice_index])
+            overlay_array = np.asarray(flair_preview).copy()
+            for label, color in label_colors.items():
+                selected = mask_slice == label
+                if np.any(selected):
+                    overlay_array[selected] = (
+                        0.40 * overlay_array[selected] + 0.60 * np.asarray(color)
+                    ).astype(np.uint8)
+            overlay_preview = Image.fromarray(overlay_array, mode="RGB")
+
+            def _png_data_url(pil_image):
+                buffer = BytesIO()
+                pil_image.save(buffer, format="PNG", optimize=True)
+                encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+                return "data:image/png;base64," + encoded
+
+            flair_preview_url = _png_data_url(flair_preview)
+            overlay_preview_url = _png_data_url(overlay_preview)
+            mask_preview_url = _png_data_url(
+                Image.fromarray(mask_slice.astype(np.uint8), mode="L")
+            )
+
+            auxiliary_probabilities = {
+                MRI_CLASS_NAMES[index]: float(probabilities[index])
+                for index in range(len(MRI_CLASS_NAMES))
+            }
+
+            return {
+                "message": "MRI research inference completed.",
+                "study_id": study_id,
+                "modalities": list(MRI_MODALITIES),
+                "input_shape": list(image_tensor.shape),
+                "segmentation_shape": list(predicted_mask.shape),
+                "segmentation_label_counts_voxels": voxel_counts,
+                "segmentation_labels": MRI_SEGMENTATION_LABELS,
+                "preview_slice_index": slice_index,
+                "flair_slice_png": flair_preview_url,
+                "segmentation_overlay_png": overlay_preview_url,
+                "segmentation_mask_png": mask_preview_url,
+                "auxiliary_class_probabilities": auxiliary_probabilities,
+                "model_device": str(device),
+                "note": (
+                    "Research output only, not a diagnosis. The segmentation-label mapping "
+                    "and center-crop inference preprocessing require validation against the "
+                    "training pipeline. A qualified clinician must interpret the results."
+                ),
+            }
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        # Keep implementation details in server logs, not API response.
+        print(f"MRI inference failed: {type(exc).__name__}: {exc}")
+        raise HTTPException(
+            status_code=500,
+            detail="MRI inference failed. Check the backend terminal for details.",
+        ) from exc
+    finally:
+        if connection is not None:
+            connection.close()
+        for _, upload in uploads:
+            await upload.close()
 
