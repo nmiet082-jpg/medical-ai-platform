@@ -1398,6 +1398,10 @@
                                 CT Scan
                             </option>
 
+                            <option value="2D Brain CT Hemorrhage">
+                                2D Brain CT — Hemorrhage Analysis
+                            </option>
+
                             <option value="Breast Ultrasound">
                                 Breast Ultrasound
                             </option>
@@ -1456,6 +1460,10 @@
                             🏥
                         </div>
 
+                        <p id="medicalImageHelp" style="margin:8px 0 14px;color:#64748b;font-size:14px;">
+                            For CT Scan, select a folder containing the complete DICOM series (.dcm files). Other modalities continue to use their supported image files.
+                        </p>
+
                         <input
                             type="file"
                             id="medicalImage"
@@ -1488,6 +1496,32 @@
                         </div>
                         <div id="mri3DValidation" role="status" aria-live="polite" style="display:none;margin-top:12px;padding:10px 12px;border-radius:8px;font-size:14px;text-align:left;"></div>
                     </div>
+
+                <!-- 2D BRAIN CT HEMORRHAGE MODEL: separate from DICOM/3D CT -->
+                <div class="section-card" id="brainCtHemorrhageUploadCard" style="display:none;">
+                    <h2>🧠 2D Brain CT Hemorrhage Analysis</h2>
+                    <p style="color:#64748b;line-height:1.6;margin-bottom:16px;">
+                        Upload one 2D brain CT slice (JPG, JPEG, or PNG). This separate model is not the DICOM folder / 3D lung CT model. Do not upload an MRI image here.
+                    </p>
+                    <div class="upload-box">
+                        <div class="upload-icon">🧠</div>
+                        <label for="brainCtHemorrhageImage" style="display:block;font-weight:600;margin-bottom:10px;">
+                            Select a 2D brain CT image
+                        </label>
+                        <input type="file" id="brainCtHemorrhageImage" class="file-input"
+                               accept=".jpg,.jpeg,.png,image/jpeg,image/png">
+                        <div id="brainCtHemorrhageFileStatus" role="status" aria-live="polite"
+                             style="margin-top:12px;color:#64748b;"></div>
+                    </div>
+                    <button type="button" class="btn btn-primary" id="runBrainCtHemorrhageButton"
+                            onclick="runBrainCtHemorrhageAnalysis()">
+                        🔬 Analyze Brain CT Image
+                    </button>
+                    <p style="margin-top:14px;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:12px;line-height:1.6;">
+                        Research use only. The result must not be used alone to make treatment decisions or rule out hemorrhage.
+                    </p>
+                </div>
+
 
                     <button
                         class="btn btn-primary"
@@ -1563,6 +1597,9 @@
 
                 </div>
 
+                <!-- Brain CT upload is selected from Medical Images; results are shown here. -->
+
+
                 <!-- MRI RESULTS ONLY: uploads are collected on Medical Images -->
                 <div class="section-card" id="mriAnalysisResultsCard" style="display:none;">
                     <h2 id="mriAnalysisResultsTitle">🧠 MRI Analysis Results</h2>
@@ -1606,6 +1643,25 @@
                     <h2>Breast Ultrasound AI Analysis</h2>
                     <div id="ultrasoundAnalysisResult"></div>
                     <button type="button" class="btn btn-primary" onclick="openUltrasoundReport()">📄 Open Ultrasound Report</button>
+                </div>
+
+                <!-- ==========================================
+                     2D BRAIN CT HEMORRHAGE RESULT (separate model)
+                =========================================== -->
+                <div class="section-card" id="brainCtHemorrhageResultSection" style="display:none;">
+                    <h2>🧠 2D Brain CT Hemorrhage AI Analysis</h2>
+                    <p style="color:#64748b;line-height:1.6;margin-bottom:16px;">
+                        Results from the separate 2D brain CT model. This workflow accepts one JPG, JPEG, or PNG image and does not use or replace the existing 3D DICOM lung CT workflow.
+                    </p>
+                    <div id="brainCtHemorrhagePreview" style="display:none;margin-bottom:18px;">
+                        <img id="brainCtHemorrhagePreviewImage" alt="Selected brain CT image preview"
+                             style="max-width:100%;max-height:360px;object-fit:contain;border:1px solid #e2e8f0;border-radius:10px;padding:6px;background:#f8fafc;">
+                    </div>
+                    <div id="brainCtHemorrhageStatus" role="status" aria-live="polite" style="margin:12px 0;color:#475569;"></div>
+                    <div id="brainCtHemorrhageResult" style="display:none;"></div>
+                    <div style="margin-top:16px;padding:12px;border:1px solid #fde68a;background:#fffbeb;color:#92400e;border-radius:8px;line-height:1.6;">
+                        <strong>Research prototype notice:</strong> This model output is experimental and is not a medical diagnosis. A qualified clinician must review the scan and all clinical information.
+                    </div>
                 </div>
 
                 <!-- ==========================================
@@ -3329,15 +3385,27 @@ let currentCTSeriesId =
             const fileInput = document.getElementById("medicalImage");
             const validationMessage = document.getElementById("medicalImageValidation");
             const isMRI = studyType === "MRI";
+            const isBrainCT = studyType === "2D Brain CT Hemorrhage";
+            const brainCTBox = document.getElementById("brainCtHemorrhageUploadCard");
+            const generalUploadButton = document.querySelector('#imagesPage button[onclick="uploadMedicalImage()"]');
 
+            if (generalUploadButton) generalUploadButton.style.display = isBrainCT ? "none" : "inline-flex";
             if (mriTypeGroup) mriTypeGroup.style.display = isMRI ? "block" : "none";
             if (mri2DBox) mri2DBox.style.display = isMRI && document.getElementById("mriStudyType").value === "2D" ? "block" : "none";
             if (mri3DBox) mri3DBox.style.display = isMRI && document.getElementById("mriStudyType").value === "3D" ? "block" : "none";
-            if (standardBox) standardBox.style.display = isMRI ? "none" : "block";
+            if (brainCTBox) brainCTBox.style.display = isBrainCT ? "block" : "none";
+            if (standardBox) standardBox.style.display = (isMRI || isBrainCT) ? "none" : "block";
             if (!fileInput) return;
 
-            if (studyType === "CT Scan") {
-                fileInput.accept = ".dcm";
+            if (isBrainCT) {
+                fileInput.accept = ".jpg,.jpeg,.png,image/jpeg,image/png";
+                fileInput.multiple = false;
+                fileInput.removeAttribute("webkitdirectory");
+                fileInput.removeAttribute("directory");
+            } else if (studyType === "CT Scan") {
+                // CT uses a folder containing the full DICOM series.
+                // Chromium browsers (Chrome/Edge) support webkitdirectory.
+                fileInput.accept = ".dcm,application/dicom";
                 fileInput.multiple = true;
                 fileInput.setAttribute("webkitdirectory", "");
                 fileInput.setAttribute("directory", "");
@@ -3461,7 +3529,7 @@ let currentCTSeriesId =
                 fileInput.value = "";
                 setMedicalImageValidation(
                     isCT
-                        ? "Invalid input. Please select a DICOM (.dcm) folder for CT scans."
+                        ? "Invalid input. The selected CT folder must contain only DICOM (.dcm) files."
                         : isBreastUltrasound
                             ? "Invalid input. Breast ultrasound accepts JPG, JPEG, or PNG."
                             : isAbdominalUltrasound
@@ -3473,7 +3541,7 @@ let currentCTSeriesId =
 
             setMedicalImageValidation(
                 isCT
-                    ? `Valid DICOM selection: ${files.length} file(s) selected.`
+                    ? `Valid CT folder selection: ${files.length} DICOM file(s) selected. The backend will process the uploaded series; a complete, correctly ordered series is required for 3D analysis.`
                     : `Valid file selected: ${files[0].name}`,
                 false
             );
@@ -3954,29 +4022,29 @@ let currentCTSeriesId =
 
             if (studyType === "CT Scan") {
 
-                const ctFiles =
-                    Array.from(fileInput.files);
+                const ctFiles = Array.from(fileInput.files || []);
 
                 if (!ctFiles.length) {
-                    setMedicalImageValidation("Please select a folder containing CT DICOM (.dcm) files.");
+                    setMedicalImageValidation("Please select a folder containing the CT DICOM (.dcm) series.");
                     return;
                 }
 
-                // Every file in the CT series must be a DICOM file.
-                const invalidCtFiles =
-                    ctFiles.filter(function(ctFile) {
+                const invalidCtFiles = ctFiles.filter(
+                    file => !String(file.name || "").toLowerCase().endsWith(".dcm")
+                );
 
-                        return !ctFile.name
-                            .toLowerCase()
-                            .endsWith(".dcm");
-                    });
-
-                if (invalidCtFiles.length > 0) {
-                    setMedicalImageValidation("Invalid input. CT scan upload requires DICOM (.dcm) files only.");
+                if (invalidCtFiles.length) {
+                    setMedicalImageValidation(
+                        "Invalid CT folder. Every uploaded file must have a .dcm extension."
+                    );
                     fileInput.value = "";
                     return;
                 }
-                setMedicalImageValidation(`Valid CT DICOM selection: ${ctFiles.length} file(s).`, false);
+
+                setMedicalImageValidation(
+                    `Valid CT folder selection: ${ctFiles.length} DICOM file(s). Uploading the series for 3D preprocessing and research analysis.`,
+                    false
+                );
 
                 const todayString =
                     new Date()
@@ -4056,7 +4124,8 @@ let currentCTSeriesId =
                     `;
 
                     // --------------------------------------------------
-                    // 2. Upload all CT DICOM slices
+                    // 2. Upload the selected CT DICOM file.
+                    // The backend accepts a list; the frontend sends exactly one file.
                     // --------------------------------------------------
 
                     const formData =
@@ -4625,7 +4694,9 @@ let currentCTSeriesId =
             }[ch]));
 
             try {
-                const response = await apiFetch("/api/mri/classify-image", {
+                const studyId = (document.getElementById("mriStudyId")?.value || localStorage.getItem("currentStudyId") || "").trim();
+                const studyQuery = studyId ? "?study_id=" + encodeURIComponent(studyId) : "";
+                const response = await apiFetch("/api/mri/classify-image" + studyQuery, {
                     method: "POST",
                     body: formData
                 });
@@ -4663,7 +4734,9 @@ let currentCTSeriesId =
                 `;
                 resultBox.style.display = "block";
                 status.style.color = "#166534";
-                status.textContent = "Classification finished. Review the research output below.";
+                status.textContent = result.report_saved
+                    ? `Classification finished. Draft report #${result.report_id} was saved for MRI study #${result.study_id}. Open Report History to view it.`
+                    : "Classification finished, but no study ID was linked, so no report was saved. Create/select an MRI study and run the analysis again.";
             } catch (error) {
                 status.style.color = "#991b1b";
                 status.textContent = "2D MRI classification failed: " + (error.message || "Unknown error");
@@ -4773,7 +4846,9 @@ let currentCTSeriesId =
                 `;
                 resultBox.style.display = "block";
                 status.style.color = "#166534";
-                status.textContent = "Finished. Review the research visualization below.";
+                status.textContent = result.report_saved
+                    ? `Finished. Draft report #${result.report_id} was saved for MRI study #${result.study_id}. Open Report History to view it.`
+                    : "Finished, but no study ID was linked, so no report was saved. Create/select an MRI study and run the analysis again.";
             } catch (error) {
                 status.style.color = "#991b1b";
                 status.textContent = "MRI segmentation failed: " + (error.message || "Unknown error");
@@ -8885,6 +8960,235 @@ let currentCTSeriesId =
                 startApplication();
 
             };
+
+
+        /* =====================================================
+           2D BRAIN CT HEMORRHAGE ANALYSIS
+           Separate from the existing 3D DICOM CT workflow.
+        ===================================================== */
+
+        document.addEventListener("DOMContentLoaded", function () {
+            const input = document.getElementById("brainCtHemorrhageImage");
+            if (!input) return;
+            input.addEventListener("change", function () {
+                const file = input.files && input.files[0];
+                const status = document.getElementById("brainCtHemorrhageFileStatus");
+                const resultSection = document.getElementById("brainCtHemorrhageResultSection");
+                const preview = document.getElementById("brainCtHemorrhagePreview");
+                const previewImage = document.getElementById("brainCtHemorrhagePreviewImage");
+                const resultBox = document.getElementById("brainCtHemorrhageResult");
+                if (resultSection) resultSection.style.display = "none";
+                if (resultBox) {
+                    resultBox.style.display = "none";
+                    resultBox.innerHTML = "";
+                }
+                if (!file) {
+                    if (status) status.textContent = "";
+                    if (preview) preview.style.display = "none";
+                    return;
+                }
+                if (/mri/i.test(file.name)) {
+                    input.value = "";
+                    if (status) status.textContent = "This filename indicates an MRI image. Please select a brain CT image; this model is trained for CT, not MRI.";
+                    if (preview) preview.style.display = "none";
+                    return;
+                }
+                if (!/\.(jpg|jpeg|png)$/i.test(file.name)) {
+                    input.value = "";
+                    if (status) status.textContent = "Unsupported file. Please choose a JPG, JPEG, or PNG image.";
+                    if (preview) preview.style.display = "none";
+                    return;
+                }
+                if (file.size > 20 * 1024 * 1024) {
+                    input.value = "";
+                    if (status) status.textContent = "The image exceeds the 20 MB upload limit.";
+                    if (preview) preview.style.display = "none";
+                    return;
+                }
+                if (status) status.textContent = "Selected: " + file.name + " (" + (file.size / (1024 * 1024)).toFixed(2) + " MB)";
+                if (previewImage) {
+                    if (previewImage.dataset.objectUrl) URL.revokeObjectURL(previewImage.dataset.objectUrl);
+                    const objectUrl = URL.createObjectURL(file);
+                    previewImage.src = objectUrl;
+                    previewImage.dataset.objectUrl = objectUrl;
+                }
+                if (preview) preview.style.display = "block";
+            });
+        });
+
+        function formatBrainCtProbability(value) {
+            if (typeof value === "string" && value.trim().endsWith("%")) {
+                const parsed = Number(value.trim().slice(0, -1));
+                return Number.isFinite(parsed) ? parsed.toFixed(2) + "%" : value;
+            }
+            const number = Number(value);
+            if (!Number.isFinite(number)) return null;
+            return (number <= 1 ? number * 100 : number).toFixed(2) + "%";
+        }
+
+        function brainCtImageDataUrl(base64Value) {
+            if (!base64Value || typeof base64Value !== "string") return "";
+            return "data:image/png;base64," + base64Value;
+        }
+
+        async function runBrainCtHemorrhageAnalysis() {
+            const input = document.getElementById("brainCtHemorrhageImage");
+            const button = document.getElementById("runBrainCtHemorrhageButton");
+            const status = document.getElementById("brainCtHemorrhageStatus");
+            const resultSection = document.getElementById("brainCtHemorrhageResultSection");
+            const resultBox = document.getElementById("brainCtHemorrhageResult");
+            const file = input && input.files ? input.files[0] : null;
+
+            if (!file) {
+                if (status) status.textContent = "Please select a JPG, JPEG, or PNG brain CT image first.";
+                return;
+            }
+            if (/mri/i.test(file.name)) {
+                alert("This filename indicates an MRI image. Please select a brain CT image; this model is trained for CT, not MRI.");
+                return;
+            }
+            if (!/\.(jpg|jpeg|png)$/i.test(file.name) || file.size > 20 * 1024 * 1024) {
+                if (status) status.textContent = "Choose a JPG, JPEG, or PNG image no larger than 20 MB.";
+                return;
+            }
+
+            const analysisNav = document.querySelector('.nav-item[onclick*="showPage(\'analysisPage\'"]');
+            showPage("analysisPage", analysisNav);
+            if (resultSection) resultSection.style.display = "block";
+            if (resultBox) {
+                resultBox.style.display = "block";
+                resultBox.innerHTML = '<p style="color:#475569;">Running brain CT classification and generating Grad-CAM explanation…</p>';
+            }
+            if (status) status.textContent = "Uploading image and generating the model prediction and explanation…";
+            if (button) {
+                button.disabled = true;
+                button.textContent = "Analyzing…";
+            }
+
+            try {
+                const formData = new FormData();
+                formData.append("file", file);
+                const response = await apiFetch("/api/brain-ct/hemorrhage/predict", {
+                    method: "POST",
+                    body: formData
+                });
+                let result = {};
+                try { result = await response.json(); } catch (_) {}
+                if (!response.ok) {
+                    throw new Error(result.detail || result.message || ("Request failed with HTTP " + response.status));
+                }
+
+                const predictionObject = (result.prediction && typeof result.prediction === "object")
+                    ? result.prediction : result;
+                const predicted = predictionObject.class || predictionObject.predicted_class ||
+                    result.predicted_class || result.label || result.class_name || "Prediction unavailable";
+                const rawProbabilities = result.probabilities || result.class_probabilities || result.scores || {
+                    "No hemorrhage": predictionObject.probability_no_hemorrhage,
+                    "Hemorrhage": predictionObject.probability_hemorrhage
+                };
+                const classNames = Array.isArray(result.classes) ? result.classes : ["No hemorrhage", "Hemorrhage"];
+                let probabilityRows = "";
+
+                const makeProbabilityRow = (label, value) => {
+                    const formatted = formatBrainCtProbability(value);
+                    const numeric = Number(String(value).replace("%", ""));
+                    const percent = Number.isFinite(numeric)
+                        ? (String(value).endsWith("%") ? numeric : (numeric <= 1 ? numeric * 100 : numeric))
+                        : 0;
+                    return `<div class="result-row"><span class="result-label">${escapeHtml(label)}</span><span class="result-value">${escapeHtml(formatted || String(value))}</span></div>
+                            <div style="height:8px;background:#e2e8f0;border-radius:99px;overflow:hidden;margin:0 0 12px;"><div style="height:100%;width:${Math.max(0, Math.min(100, percent))}%;background:#2563eb;border-radius:99px;"></div></div>`;
+                };
+
+                if (Array.isArray(rawProbabilities)) {
+                    probabilityRows = rawProbabilities.map((value, index) =>
+                        makeProbabilityRow(classNames[index] || ("Class " + index), value)
+                    ).join("");
+                } else if (rawProbabilities && typeof rawProbabilities === "object") {
+                    probabilityRows = Object.entries(rawProbabilities)
+                        .filter(([, value]) => value !== null && value !== undefined)
+                        .map(([label, value]) => makeProbabilityRow(label, value)).join("");
+                }
+
+                const confidence = formatBrainCtProbability(
+                    predictionObject.confidence ?? result.confidence ?? result.confidence_score
+                );
+                const explanation = result.explanation && typeof result.explanation === "object"
+                    ? result.explanation : {};
+                const heatmapUrl = brainCtImageDataUrl(explanation.gradcam_overlay_base64);
+                const boxedUrl = brainCtImageDataUrl(explanation.candidate_box_overlay_base64);
+                const boxCoordinates = Array.isArray(explanation.candidate_region_box_xyxy)
+                    ? explanation.candidate_region_box_xyxy.join(", ")
+                    : "not available";
+                const triage = result.triage && typeof result.triage === "object"
+                    ? result.triage : {
+                        priority: "Manual Review",
+                        reason: "The backend did not return a triage result. Qualified review is required."
+                    };
+                const priority = String(triage.priority || "Manual Review");
+                const priorityLower = priority.toLowerCase();
+                const triageAccent = priorityLower.includes("high") ? "#b91c1c"
+                    : priorityLower.includes("moderate") ? "#92400e" : "#334155";
+                const triageBackground = priorityLower.includes("high") ? "#fef2f2"
+                    : priorityLower.includes("moderate") ? "#fffbeb" : "#f0fdf4";
+
+                const explanationHtml = (heatmapUrl || boxedUrl) ? `
+                    <div style="margin-top:22px;">
+                        <h3 style="margin-bottom:8px;color:#0f172a;">Image explanation — Grad-CAM</h3>
+                        <p style="color:#64748b;line-height:1.6;margin-bottom:14px;">
+                            The heatmap shows image regions that influenced the model output. The green square marks a candidate region selected from the heatmap; it is not a confirmed hemorrhage location.
+                        </p>
+                        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;">
+                            ${heatmapUrl ? `<div style="border:1px solid #e2e8f0;border-radius:10px;padding:12px;background:white;">
+                                <h4 style="margin:0 0 10px;color:#334155;">Grad-CAM heatmap</h4>
+                                <img src="${heatmapUrl}" alt="Brain CT Grad-CAM heatmap overlay" style="display:block;width:100%;max-width:440px;margin:auto;border-radius:8px;">
+                            </div>` : ""}
+                            ${boxedUrl ? `<div style="border:1px solid #e2e8f0;border-radius:10px;padding:12px;background:white;">
+                                <h4 style="margin:0 0 10px;color:#334155;">Candidate region — green box</h4>
+                                <img src="${boxedUrl}" alt="Brain CT Grad-CAM overlay with green candidate-region box" style="display:block;width:100%;max-width:440px;margin:auto;border-radius:8px;">
+                                <p style="margin-top:8px;font-size:12px;color:#64748b;">Box coordinates (224 × 224 image): ${escapeHtml(boxCoordinates)}</p>
+                            </div>` : ""}
+                        </div>
+                        <p style="margin-top:10px;font-size:13px;color:#92400e;line-height:1.5;">
+                            ${escapeHtml(explanation.note || "Candidate box is an experimental model explanation, not validated localization.")}
+                        </p>
+                    </div>` : `
+                    <div style="margin-top:18px;padding:12px;border:1px solid #fde68a;background:#fffbeb;color:#92400e;border-radius:8px;">
+                        The prediction completed, but the backend did not return Grad-CAM image data. Check the backend service logs.
+                    </div>`;
+
+                resultBox.innerHTML = `
+                    <div style="border:1px solid #cbd5e1;border-radius:12px;padding:20px;background:#f8fafc;">
+                        <h3 style="margin-bottom:14px;color:#0f172a;">Model Output</h3>
+                        <div class="result-row"><span class="result-label">Predicted class</span><span class="result-value"><strong>${escapeHtml(String(predicted))}</strong></span></div>
+                        ${confidence ? `<div class="result-row"><span class="result-label">Confidence</span><span class="result-value">${escapeHtml(confidence)}</span></div>` : ""}
+                        ${probabilityRows ? `<h3 style="margin:20px 0 12px;color:#0f172a;">Class probabilities</h3>${probabilityRows}` : ""}
+                        <p style="margin-top:14px;color:#64748b;font-size:13px;line-height:1.6;">Filename: ${escapeHtml(file.name)}. This is an experimental slice-level model prediction, not a confirmed clinical finding.</p>
+                        ${explanationHtml}
+                    </div>
+                    <div style="margin-top:18px;border:1px solid #cbd5e1;border-radius:12px;padding:20px;background:${triageBackground};">
+                        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+                            <h3 style="margin:0;color:#0f172a;">🚦 Brain CT AI Triage</h3>
+                            <span style="padding:8px 12px;border-radius:999px;background:#fff;border:1px solid #cbd5e1;font-size:13px;">Operational workflow priority</span>
+                        </div>
+                        <div class="result-row" style="margin-top:12px;"><span class="result-label">Triage Priority</span><span class="result-value" style="font-weight:700;color:${triageAccent};">${escapeHtml(priority)}</span></div>
+                        <div style="margin-top:12px;"><strong>Reason</strong><p style="margin-top:6px;line-height:1.6;color:#334155;">${escapeHtml(String(triage.reason || "No triage reason returned."))}</p></div>
+                        <p style="margin-top:12px;color:#92400e;font-size:13px;line-height:1.6;">⚠️ Triage is a research workflow label, not a medical diagnosis or a clinical urgency assessment. A qualified clinician must review the scan and clinical information. Do not use this result to rule out hemorrhage.</p>
+                    </div>`;
+
+                if (status) status.textContent = "Analysis and explanation request completed.";
+            } catch (error) {
+                if (status) status.textContent = "Analysis failed: " + (error.message || "Unknown error");
+                if (resultBox) {
+                    resultBox.style.display = "block";
+                    resultBox.innerHTML = `<div style="padding:14px;border-radius:8px;background:#fef2f2;border:1px solid #fecaca;color:#991b1b;">${escapeHtml(error.message || "Could not analyze this image.")}</div>`;
+                }
+            } finally {
+                if (button) {
+                    button.disabled = false;
+                    button.textContent = "🔬 Analyze Brain CT Image";
+                }
+            }
+        }
 
         document.addEventListener(
             "DOMContentLoaded",

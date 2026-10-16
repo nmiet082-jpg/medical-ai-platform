@@ -4875,10 +4875,10 @@ def _generate_ct_gradcam_artifact(
     ).clip(0, 255).astype(np.uint8)
 
     base = Image.fromarray(gray_rgb, mode="RGB").resize(
-        (512, 512), Image.Resampling.NEAREST
+        (512, 512), Image.Resampling.BICUBIC
     )
     overlay_image = Image.fromarray(overlay, mode="RGB").resize(
-        (512, 512), Image.Resampling.NEAREST
+        (512, 512), Image.Resampling.BICUBIC
     )
 
     canvas = Image.new("RGB", (1024, 560), (15, 23, 42))
@@ -6200,12 +6200,60 @@ def custom_openapi():
 app.openapi = custom_openapi
 
 # ============================================================
+# MRI DRAFT REPORT PERSISTENCE
+# ============================================================
+def save_mri_draft_report(study_id: int | None, current_user: dict, report_text: str):
+    """Persist MRI research output as a draft without changing other modality workflows."""
+    if study_id is None:
+        return None
+
+    connection = get_connection()
+    try:
+        cursor = connection.cursor()
+        cursor.execute("SELECT id, study_type FROM studies WHERE id = ?", (study_id,))
+        study = cursor.fetchone()
+        if study is None:
+            raise HTTPException(status_code=404, detail="MRI study not found.")
+        if str(study["study_type"]).strip().lower() != "mri":
+            raise HTTPException(status_code=400, detail="The supplied study ID is not an MRI study.")
+
+        generated_by = current_user.get("full_name") or current_user.get("username") or "Unknown user"
+        cursor.execute(
+            "INSERT INTO reports (study_id, report_status, report_text, generated_by) VALUES (?, ?, ?, ?)",
+            (study_id, "Draft", report_text, generated_by),
+        )
+        report_id = cursor.lastrowid
+        cursor.execute(
+            "INSERT INTO audit_logs (action, entity_type, entity_id, performed_by, details) VALUES (?, ?, ?, ?, ?)",
+            (
+                "mri_draft_report_created",
+                "study",
+                str(study_id),
+                generated_by,
+                f"Report ID {report_id}; status=Draft; MRI research inference output",
+            ),
+        )
+        connection.commit()
+        return report_id
+    except HTTPException:
+        connection.rollback()
+        raise
+    except Exception as exc:
+        connection.rollback()
+        print(f"MRI draft report save failed: {type(exc).__name__}: {exc}")
+        raise HTTPException(status_code=500, detail="MRI results were produced, but the draft report could not be saved.") from exc
+    finally:
+        connection.close()
+
+
+# ============================================================
 # MRI 2D IMAGE CLASSIFICATION API (research inference)
 # ============================================================
 
 @app.post("/api/mri/classify-image")
 async def classify_mri_2d_image(
     file: UploadFile = File(...),
+    study_id: int | None = None,
     current_user: dict = Depends(require_roles('Administrator', 'Radiologist', 'AI/ML Engineer')),
 ):
     """Classify one PNG/JPG/JPEG brain MRI image with the trained 2D classifier."""
@@ -6268,8 +6316,34 @@ async def classify_mri_2d_image(
         image.resize((224, 224)).save(original_buffer, format="PNG")
         original_base64 = base64.b64encode(original_buffer.getvalue()).decode("ascii")
 
+        note = (
+            "Research output only. This classifier is intended for brain MRI images in its "
+            "training domain, is not clinically validated, and must not be used as a diagnosis. "
+            "Scores are not calibrated probabilities; qualified clinician review is required."
+        )
+        report_lines = [
+            "MRI 2D AI RESEARCH REPORT (DRAFT)",
+            "=================================",
+            f"Study ID: {study_id if study_id is not None else 'Not linked'}",
+            f"Input filename: {Path(file.filename or 'uploaded_image').name}",
+            "Modality/workflow: MRI 2D image classification",
+            f"Predicted model class: {result['predicted_class']}",
+            f"Highest model score (not calibrated): {float(result['score']):.6f}",
+            "Class scores:",
+        ]
+        report_lines.extend(
+            f"- {name}: {float(score):.6f}"
+            for name, score in (result.get("probabilities") or {}).items()
+        )
+        report_lines.extend(["", f"Model: ResNet-18 2D brain MRI classifier", f"Research limitation: {note}"])
+        report_id = save_mri_draft_report(study_id, current_user, "\n".join(report_lines))
+
         return {
             "message": "2D MRI research classification completed.",
+            "study_id": study_id,
+            "report_saved": report_id is not None,
+            "report_id": report_id,
+            "report_status": "Draft" if report_id is not None else None,
             "input_filename": Path(file.filename or "uploaded_image").name,
             "predicted_class": result["predicted_class"],
             "score_not_calibrated": result["score"],
@@ -6279,11 +6353,7 @@ async def classify_mri_2d_image(
             "gradcam_target_class": result["predicted_class"],
             "model": "ResNet-18 2D brain MRI classifier",
             "model_device": str(device),
-            "note": (
-                "Research output only. This classifier is intended for brain MRI images in its "
-                "training domain, is not clinically validated, and must not be used as a diagnosis. "
-                "Scores are not calibrated probabilities; qualified clinician review is required."
-            ),
+            "note": note,
         }
     except HTTPException:
         raise
@@ -6409,9 +6479,40 @@ async def segment_mri_volume(
                 for index in range(len(MRI_CLASS_NAMES))
             }
 
+            note = (
+                "Research output only, not a diagnosis. The segmentation-label mapping "
+                "and center-crop inference preprocessing require validation against the "
+                "training pipeline. A qualified clinician must interpret the results."
+            )
+            report_lines = [
+                "MRI 3D AI SEGMENTATION REPORT (DRAFT)",
+                "====================================",
+                f"Study ID: {study_id if study_id is not None else 'Not linked'}",
+                "Modality/workflow: MRI 3D multi-modal segmentation",
+                "Input modalities: FLAIR, T1, T1ce, T2",
+                f"Input tensor shape: {list(image_tensor.shape)}",
+                f"Segmentation output shape: {list(predicted_mask.shape)}",
+                f"Preview slice index: {slice_index}",
+                "Voxel counts by segmentation label:",
+            ]
+            report_lines.extend(
+                f"- Label {label} ({MRI_SEGMENTATION_LABELS.get(label, 'Background/other')}): {count} voxels"
+                for label, count in voxel_counts.items()
+            )
+            report_lines.append("Auxiliary classification scores:")
+            report_lines.extend(
+                f"- {name}: {float(score):.6f}"
+                for name, score in auxiliary_probabilities.items()
+            )
+            report_lines.extend(["", f"Research limitation: {note}"])
+            report_id = save_mri_draft_report(study_id, current_user, "\n".join(report_lines))
+
             return {
                 "message": "MRI research inference completed.",
                 "study_id": study_id,
+                "report_saved": report_id is not None,
+                "report_id": report_id,
+                "report_status": "Draft" if report_id is not None else None,
                 "modalities": list(MRI_MODALITIES),
                 "input_shape": list(image_tensor.shape),
                 "segmentation_shape": list(predicted_mask.shape),
@@ -6423,11 +6524,7 @@ async def segment_mri_volume(
                 "segmentation_mask_png": mask_preview_url,
                 "auxiliary_class_probabilities": auxiliary_probabilities,
                 "model_device": str(device),
-                "note": (
-                    "Research output only, not a diagnosis. The segmentation-label mapping "
-                    "and center-crop inference preprocessing require validation against the "
-                    "training pipeline. A qualified clinician must interpret the results."
-                ),
+                "note": note,
             }
 
     except HTTPException:
@@ -6444,4 +6541,68 @@ async def segment_mri_volume(
             connection.close()
         for _, upload in uploads:
             await upload.close()
+
+
+# ============================================================
+# 2D BRAIN CT HEMORRHAGE PREDICTION (SEPARATE FROM 3D CT)
+# Add this block near the END of main.py, after existing routes.
+# Do not replace or edit the existing DICOM CT endpoints.
+# ============================================================
+
+# Reuse the same CT model parent directory already configured above.
+BRAIN_CT_MODEL_DIR = CT_MODEL_DIR.parent / "brain_hemorrhage_2d"
+if str(BRAIN_CT_MODEL_DIR) not in sys.path:
+    sys.path.insert(0, str(BRAIN_CT_MODEL_DIR))
+
+BRAIN_CT_ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png"}
+
+
+@app.post("/api/brain-ct/hemorrhage/predict")
+async def predict_brain_ct_hemorrhage_endpoint(
+    file: UploadFile = File(...),
+    _rbac_user: dict = Depends(
+        require_roles("Administrator", "Radiologist", "AI/ML Engineer")
+    ),
+):
+    """Classify one JPG/JPEG/PNG brain CT slice with the separate 2D model."""
+    original_name = file.filename or "brain_ct.png"
+    extension = Path(original_name).suffix.lower()
+
+    if extension not in BRAIN_CT_ALLOWED_EXTENSIONS:
+        await file.close()
+        raise HTTPException(
+            status_code=400,
+            detail="Upload a JPG, JPEG, or PNG brain CT image.",
+        )
+
+    try:
+        image_bytes = await file.read()
+        # Guard against accidentally uploading extremely large files.
+        if len(image_bytes) > 20 * 1024 * 1024:
+            raise HTTPException(
+                status_code=413,
+                detail="Image is too large. Maximum upload size is 20 MB.",
+            )
+
+        # Local import prevents any effect on backend startup when the model
+        # checkpoint is not present yet.
+        from brain_ct_hemorrhage_service import predict_brain_ct_hemorrhage
+
+        return predict_brain_ct_hemorrhage(image_bytes, original_name)
+
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Brain CT hemorrhage inference failed: {exc}",
+        ) from exc
+    finally:
+        await file.close()
 
