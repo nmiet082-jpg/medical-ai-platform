@@ -1,264 +1,143 @@
-import torch
-import numpy as np
-from PIL import Image
+
 from pathlib import Path
-from torchvision import transforms
+
 import cv2
+import numpy as np
+import torch
+from PIL import Image
+
+# Reuse the exact six-class model and preprocessing used by prediction.
+from ai.predict import model, CLASS_NAMES, IMAGE_TRANSFORM
 
 
-# ============================================================
-# MODEL CONFIGURATION
-# ============================================================
+MODEL_NAME = "ResNet18 Medical 6-Class"
+MODEL_VERSION = "2.0"
 
-CLASS_NAMES = [
-    "Pneumonia",
-    "Cardiomegaly",
-    "Pneumothorax"
-]
-
-
-MODEL_PATH = (
-    Path(__file__).resolve().parent.parent
-    / "backend"
-    / "models"
-    / "resnet18_medical_3class_best.pth"
-)
-
-
-# ============================================================
-# IMAGE PREPROCESSING
-# ============================================================
-
-transform = transforms.Compose([
-    transforms.Resize((224, 224)),
-    transforms.ToTensor(),
-    transforms.Normalize(
-        mean=[0.485, 0.456, 0.406],
-        std=[0.229, 0.224, 0.225]
-    )
-])
-
-
-# ============================================================
-# LOAD MODEL
-# ============================================================
-
-def load_model():
-
-    import torch.nn as nn
-    from torchvision import models
-
-    model = models.resnet18(weights=None)
-
-    model.fc = nn.Linear(
-        model.fc.in_features,
-        3
-    )
-
-    checkpoint = torch.load(
-        MODEL_PATH,
-        map_location="cpu"
-    )
-
-    model.load_state_dict(
-        checkpoint,
-        strict=True
-    )
-
-    model.eval()
-
-    return model
-
-
-# ============================================================
-# GRAD-CAM
-# ============================================================
 
 class GradCAM:
+    """Grad-CAM for the six-class ResNet18 classifier."""
 
-    def __init__(self, model):
-
-        self.model = model
-
-        self.gradients = None
+    def __init__(self, classifier):
+        # classifier is the full ResNet18 model.
+        self.model = classifier
         self.activations = None
+        self.gradients = None
 
-        # ResNet18 final convolutional layer
         self.target_layer = self.model.layer4[-1]
 
         self.forward_handle = (
             self.target_layer.register_forward_hook(
-                self.save_activation
+                self._save_activation
             )
         )
 
         self.backward_handle = (
             self.target_layer.register_full_backward_hook(
-                self.save_gradient
+                self._save_gradient
             )
         )
 
-
-    def save_activation(
-        self,
-        module,
-        input,
-        output
-    ):
-
+    def _save_activation(self, module, inputs, output):
         self.activations = output.detach()
 
-
-    def save_gradient(
-        self,
-        module,
-        grad_input,
-        grad_output
-    ):
-
+    def _save_gradient(self, module, grad_input, grad_output):
         self.gradients = grad_output[0].detach()
 
+    def generate(self, image_tensor, class_index):
+        if not 0 <= class_index < len(CLASS_NAMES):
+            raise ValueError(
+                f"Invalid class index: {class_index}"
+            )
 
-    def generate(
-        self,
-        image_tensor,
-        class_index
-    ):
+        self.model.zero_grad(set_to_none=True)
 
-        self.model.zero_grad()
+        # Do not use torch.no_grad() here; Grad-CAM needs gradients.
+        output = self.model(image_tensor)
+        target_score = output[0, class_index]
+        target_score.backward()
 
-        output = self.model(
-            image_tensor
-        )
+        if self.gradients is None or self.activations is None:
+            raise RuntimeError(
+                "Grad-CAM could not capture model gradients."
+            )
 
-        target = output[
-            0,
-            class_index
-        ]
-
-        target.backward()
-
-        gradients = self.gradients
-        activations = self.activations
-
-        # Global average pooling of gradients
-        weights = torch.mean(
-            gradients,
+        weights = self.gradients.mean(
             dim=(2, 3),
             keepdim=True
         )
 
-        # Weighted activation maps
-        cam = torch.sum(
-            weights * activations,
-            dim=1
-        )
+        cam = (
+            weights * self.activations
+        ).sum(dim=1)
 
-        cam = torch.relu(cam)
+        cam = torch.relu(cam)[0].cpu().numpy()
 
-        cam = cam.squeeze().cpu().numpy()
+        cam_min = float(cam.min())
+        cam_max = float(cam.max())
 
-        # Normalize between 0 and 1
-        cam -= cam.min()
-
-        if cam.max() > 0:
-            cam /= cam.max()
+        if cam_max > cam_min:
+            cam = (cam - cam_min) / (cam_max - cam_min)
+        else:
+            cam = np.zeros_like(cam, dtype=np.float32)
 
         return cam
 
-
     def close(self):
-
         self.forward_handle.remove()
         self.backward_handle.remove()
 
 
-# ============================================================
-# GENERATE XAI HEATMAP
-# ============================================================
+def generate_gradcam(image_path, class_index, output_path):
+    """
+    Generate a Grad-CAM overlay for a selected classifier class.
 
-def generate_gradcam(
-    image_path,
-    class_index,
-    output_path
-):
+    This visualization is an AI explanation, not a diagnosis.
+    """
 
     image_path = Path(image_path)
     output_path = Path(output_path)
 
-    if not image_path.exists():
-
+    if not image_path.is_file():
         raise FileNotFoundError(
             f"Image not found: {image_path}"
         )
 
+    if not 0 <= class_index < len(CLASS_NAMES):
+        raise ValueError(
+            f"Invalid class index: {class_index}"
+        )
 
-    # --------------------------------------------------------
-    # Load original image
-    # --------------------------------------------------------
+    with Image.open(image_path) as source_image:
+        original_image = source_image.convert("RGB")
 
-    original_image = Image.open(
-        image_path
-    ).convert("RGB")
+    original_array = np.asarray(original_image)
 
-
-    original_array = np.array(
-        original_image
-    )
-
-
-    # --------------------------------------------------------
-    # Prepare image for model
-    # --------------------------------------------------------
-
-    image_tensor = transform(
+    image_tensor = IMAGE_TRANSFORM(
         original_image
     ).unsqueeze(0)
 
-
-    # --------------------------------------------------------
-    # Load model
-    # --------------------------------------------------------
-
-    model = load_model()
-
-
-    # --------------------------------------------------------
-    # Generate Grad-CAM
-    # --------------------------------------------------------
-
+    # Reuse the same model object used by predict_image().
+    # The model has six outputs in CLASS_NAMES order.
     gradcam = GradCAM(model)
 
-    heatmap = gradcam.generate(
-        image_tensor,
-        class_index
-    )
-
-    gradcam.close()
-
-
-    # --------------------------------------------------------
-    # Resize heatmap to original image size
-    # --------------------------------------------------------
+    try:
+        model.eval()
+        heatmap = gradcam.generate(
+            image_tensor,
+            class_index
+        )
+    finally:
+        gradcam.close()
+        model.zero_grad(set_to_none=True)
 
     heatmap = cv2.resize(
         heatmap,
-        (
-            original_array.shape[1],
-            original_array.shape[0]
-        )
+        (original_array.shape[1], original_array.shape[0])
     )
 
-
-    # Convert to 8-bit
     heatmap_uint8 = np.uint8(
-        255 * heatmap
+        np.clip(heatmap, 0.0, 1.0) * 255
     )
-
-
-    # --------------------------------------------------------
-    # Create colored heatmap
-    # --------------------------------------------------------
 
     heatmap_color = cv2.applyColorMap(
         heatmap_uint8,
@@ -270,11 +149,6 @@ def generate_gradcam(
         cv2.COLOR_BGR2RGB
     )
 
-
-    # --------------------------------------------------------
-    # Create overlay
-    # --------------------------------------------------------
-
     overlay = cv2.addWeighted(
         original_array,
         0.60,
@@ -283,58 +157,30 @@ def generate_gradcam(
         0
     )
 
-
-    # --------------------------------------------------------
-    # Save result
-    # --------------------------------------------------------
-
     output_path.parent.mkdir(
         parents=True,
         exist_ok=True
     )
 
-    Image.fromarray(
-        overlay
-    ).save(
-        output_path
-    )
-
+    Image.fromarray(overlay).save(output_path)
 
     return {
         "output_path": str(output_path),
         "class_name": CLASS_NAMES[class_index],
         "method": "Grad-CAM",
-        "model": "ResNet18 Medical 3-Class",
-        "model_version": "1.0"
+        "model": MODEL_NAME,
+        "model_version": MODEL_VERSION,
+        "clinical_note": (
+            "AI explanation only. The heatmap does not "
+            "establish a medical diagnosis."
+        ),
     }
 
 
-# ============================================================
-# TEST
-# ============================================================
-
 if __name__ == "__main__":
+    print("XAI module loaded successfully.")
+    print("Model:", MODEL_NAME)
+    print("Supported classes:")
 
-    print(
-        "XAI module loaded successfully."
-    )
-
-    print(
-        "Model path:"
-    )
-
-    print(
-        MODEL_PATH
-    )
-
-    print(
-        "Supported classes:"
-    )
-
-    for index, class_name in enumerate(
-        CLASS_NAMES
-    ):
-
-        print(
-            f"{index}: {class_name}"
-        )
+    for index, class_name in enumerate(CLASS_NAMES):
+        print(f"{index}: {class_name}")

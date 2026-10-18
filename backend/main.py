@@ -1,5 +1,5 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse, FileResponse, Response
 from typing import Annotated
 from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -18,6 +18,8 @@ from pydantic import BaseModel
 
 import shutil
 
+import subprocess
+
 import uuid
 
 import numpy as np
@@ -33,6 +35,25 @@ import torch
 import SimpleITK as sitk
 
 from datetime import datetime, timedelta, timezone
+
+
+def _format_timestamp_ist(value):
+    """Format stored timestamps in India Standard Time without changing DB values.
+
+    SQLite CURRENT_TIMESTAMP returns UTC text without a timezone suffix, so naive
+    timestamps are treated as UTC. Explicit offsets are respected.
+    """
+    if value is None or str(value).strip() == "":
+        return "—"
+    raw = str(value).strip()
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        india_tz = timezone(timedelta(hours=5, minutes=30))
+        return parsed.astimezone(india_tz).strftime("%d-%m-%Y %H:%M:%S IST")
+    except (ValueError, TypeError):
+        return raw
 
 # --------------------------------------------------
 
@@ -981,6 +1002,40 @@ def generate_explanation_for_study(study_id: int,
                 status_code=404,
                 detail="No AI predictions found for this study"
             )
+
+        # XAI's current Grad-CAM model supports only the three classes in
+        # CLASS_INDEX_MAP. Never pass a "Normal" prediction (or any other
+        # unsupported label) to that model. If an abnormal supported class
+        # is also stored for this study, explain the highest-scoring one.
+        supported_predictions = [
+            prediction for prediction in predictions
+            if prediction["abnormality"] in CLASS_INDEX_MAP
+        ]
+        if not supported_predictions:
+            normal_prediction = max(
+                predictions,
+                key=lambda row: float(row["confidence_score"])
+            )
+            normal_class = str(normal_prediction["abnormality"] or "Unknown")
+            if normal_class.strip().casefold() == "normal":
+                return {
+                    "message": "The X-ray model predicted Normal. Grad-CAM was not generated because the current XAI checkpoint supports only Pneumonia, Cardiomegaly, and Pneumothorax targets.",
+                    "study_id": study_id,
+                    "explanation_available": False,
+                    "finding": normal_class,
+                    "probability": float(normal_prediction["confidence_score"]),
+                    "model_name": "ResNet18 Medical 3-Class",
+                    "explanation_type": "Grad-CAM",
+                    "note": "The model prediction is shown, but no supported abnormality target is available for a Grad-CAM heatmap. This is not a diagnosis."
+                }
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "No supported XAI target was found for this study. "
+                    "Supported targets are Pneumonia, Cardiomegaly, and Pneumothorax."
+                )
+            )
+        predictions = supported_predictions
 
         # --------------------------------------------------
         # 4. Class thresholds
@@ -2973,6 +3028,369 @@ def get_clinician_dashboard(current_user: dict = Depends(require_roles('Clinicia
     finally:
         connection.close()
 
+def _build_report_pdf(lines: list[str]) -> bytes:
+    """Build a polished, paginated PDF using only Python's standard library."""
+    import re
+    import textwrap
+
+    # Keep this generator dependency-free so existing project environments work.
+    PAGE_W, PAGE_H = 595.0, 842.0  # A4 points
+    MARGIN = 42.0
+    CONTENT_W = PAGE_W - 2 * MARGIN
+    NAVY = (0.075, 0.13, 0.23)
+    BLUE = (0.12, 0.31, 0.62)
+    TEAL = (0.05, 0.48, 0.49)
+    INK = (0.16, 0.20, 0.27)
+    MUTED = (0.39, 0.44, 0.51)
+    PALE = (0.94, 0.96, 0.98)
+    LINE = (0.85, 0.88, 0.91)
+    WHITE = (1.0, 1.0, 1.0)
+
+    headings = [
+        "STUDY INFORMATION", "AI ANALYSIS", "EXPLAINABLE AI", "AI TRIAGE",
+        "AI TRIAGE PRIORITY", "CLINICIAN REVIEW", "INTERPRETATION NOTICE",
+        "RESEARCH PROTOTYPE NOTICE", "REPORT CONTENT",
+        "AI MEDICAL IMAGING ANALYSIS REPORT",
+    ]
+    heading_re = re.compile(
+        r"(?<![A-Za-z])(" + "|".join(re.escape(x) for x in sorted(headings, key=len, reverse=True)) + r")(?![A-Za-z])",
+    )
+    field_labels = [
+        "Study ID", "Patient ID", "Patient Name", "Age", "Gender", "Study Type", "Study Date",
+        "Model", "Model Version", "Method", "Finding Explained", "Explanation Image", "Priority",
+        "Reason", "Clinician", "Review Status", "AI Medical Review Status", "Final Decision", "Comments",
+        "Report ID", "Report Status", "Created", "Generated By", "AI Analysis Model", "Threshold",
+    ]
+    label_re = re.compile(r"(?<![A-Za-z])(" + "|".join(re.escape(x) for x in sorted(field_labels, key=len, reverse=True)) + r")\s*:", re.I)
+
+    raw_text = "\n".join(str(x or "") for x in lines).replace("\r", "\n")
+    # Normalize a saved report that may have been flattened into a single line.
+    raw_text = heading_re.sub(lambda m: "\n" + m.group(1).upper() + "\n", raw_text)
+    raw_text = re.sub(r"(?<!^)(?=(?:Fracture|Normal|Pneumonia|Pneumothorax|Pleural Effusion|Cardiomegaly):)", "\n", raw_text, flags=re.I)
+    raw_text = re.sub(r"(?i)(?<![A-Za-z])Research Prototype Notice:", "\nRESEARCH PROTOTYPE NOTICE\n", raw_text)
+    raw_text = re.sub(r"Clinician:\s*AI Medical\s+(?=AI Medical Review Status:)", "Clinician: AI Medical\n", raw_text, flags=re.I)
+    raw_text = label_re.sub(lambda m: "\n" + m.group(1) + ":", raw_text)
+    raw_lines = [re.sub(r"\s+", " ", x).strip(" \t|=-") for x in raw_text.split("\n")]
+    raw_lines = [x for x in raw_lines if x]
+
+    # Split the report into titled sections, retaining all non-empty report content.
+    sections: list[tuple[str, list[str]]] = []
+    current_title = "REPORT OVERVIEW"
+    current_lines: list[str] = []
+    metadata: list[tuple[str, str]] = []
+    meta_names = {"Report ID", "Patient ID", "Patient Name", "Study ID", "Study Type", "Study Date", "Report Status", "Created", "Generated By"}
+    for line in raw_lines:
+        normalized = line.upper().strip(": ")
+        # REPORT CONTENT is a wrapper label, not a section to suppress. Keep the
+        # following saved report text in the current section so PDFs include it.
+        if normalized == "REPORT CONTENT":
+            continue
+        if normalized in {h.upper() for h in headings}:
+            if current_lines or not sections:
+                sections.append((current_title, current_lines))
+            current_title, current_lines = normalized, []
+            continue
+        match = re.match(r"^([^:]{1,50}):\s*(.*)$", line)
+        if match and match.group(1).strip().casefold() in {x.casefold() for x in meta_names}:
+            key, value = match.group(1).strip(), match.group(2).strip()
+            if key.casefold() == "generated by" and value.upper() == "CLINICIAN REVIEW":
+                continue
+            metadata.append((key, value or "—"))
+            if current_title == "REPORT OVERVIEW":
+                continue
+        current_lines.append(line)
+    if current_lines or not sections:
+        sections.append((current_title, current_lines))
+
+    # Flatten duplicate/empty section headings caused by a report's own title.
+    cleaned_sections: list[tuple[str, list[str]]] = []
+    for title, content in sections:
+        content = [x for x in content if x and x.upper() != title]
+        if title == "REPORT OVERVIEW" and not content:
+            continue
+        cleaned_sections.append((title, content))
+    sections = cleaned_sections
+
+    objects: list[bytes] = []
+    def add_obj(data: bytes) -> int:
+        objects.append(data)
+        return len(objects)
+    catalog_id = add_obj(b"")
+    pages_id = add_obj(b"")
+    font_regular = add_obj(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>")
+    font_bold = add_obj(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>")
+    page_ids: list[int] = []
+    page_streams: list[list[str]] = []
+    commands: list[str] = []
+    y = PAGE_H - 40
+    page_number = 0
+
+    def rgb(color):
+        return " ".join(f"{v:.3f}" for v in color)
+    def rect(x, top, w, h, color, stroke=None):
+        c = ["q", rgb(color) + " rg", f"{x:.2f} {top-h:.2f} {w:.2f} {h:.2f} re f"]
+        if stroke:
+            c.extend([rgb(stroke) + " RG", "0.7 w", f"{x:.2f} {top-h:.2f} {w:.2f} {h:.2f} re S"])
+        c.append("Q")
+        commands.extend(c)
+    def line(x1, y1, x2, y2, color=LINE, width=0.7):
+        commands.extend(["q", rgb(color) + " RG", f"{width:.2f} w", f"{x1:.2f} {y1:.2f} m {x2:.2f} {y2:.2f} l S", "Q"])
+    def txt(x, baseline, value, size=9.5, bold=False, color=INK):
+        safe = str(value).encode("cp1252", errors="replace").decode("cp1252")
+        safe = safe.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+        commands.extend(["BT", rgb(color) + " rg", f"/{'F2' if bold else 'F1'} {size:.2f} Tf", f"1 0 0 1 {x:.2f} {baseline:.2f} Tm", f"({safe}) Tj", "ET"])
+    def new_page():
+        nonlocal commands, y, page_number
+        if commands:
+            page_streams.append(commands)
+        commands = []
+        page_number += 1
+        # Running header and footer on every page.
+        rect(0, PAGE_H, PAGE_W, 9, TEAL)
+        txt(MARGIN, PAGE_H - 31, "AI MEDICAL IMAGING", 8.5, True, BLUE)
+        txt(PAGE_W - MARGIN - 90, PAGE_H - 31, "RESEARCH REPORT", 8, True, MUTED)
+        line(MARGIN, PAGE_H - 42, PAGE_W - MARGIN, PAGE_H - 42)
+        y = PAGE_H - 60
+    def ensure(height):
+        nonlocal y
+        if y - height < 62:
+            # Footer is drawn after the content is complete for the page.
+            txt(MARGIN, 30, "Confidential medical information · For authorized review only", 7.2, False, MUTED)
+            txt(PAGE_W - MARGIN - 52, 30, f"Page {page_number}", 7.2, False, MUTED)
+            line(MARGIN, 43, PAGE_W - MARGIN, 43)
+            new_page()
+    def wrap(value, max_chars):
+        return textwrap.wrap(str(value), width=max_chars, break_long_words=True, break_on_hyphens=False) or [""]
+
+    new_page()
+    # Cover title block
+    rect(MARGIN, y, CONTENT_W, 78, NAVY)
+    txt(MARGIN + 18, y - 27, "MEDICAL IMAGING REPORT", 17, True, WHITE)
+    txt(MARGIN + 18, y - 46, "AI-assisted analysis and recorded review", 9.5, False, (0.86, 0.90, 0.96))
+    status = next((v for k, v in metadata if k.casefold() == "report status"), "Final")
+    rect(PAGE_W - MARGIN - 95, y - 16, 76, 20, (0.10, 0.39, 0.35))
+    txt(PAGE_W - MARGIN - 86, y - 29, status.upper()[:14], 8, True, WHITE)
+    y -= 94
+
+    # Compact, two-column study summary card.
+    summary_keys = ["Report ID", "Patient ID", "Patient Name", "Study ID", "Study Type", "Study Date", "Created", "Generated By"]
+    summary = [(k, next((v for mk, v in metadata if mk.casefold() == k.casefold()), "—")) for k in summary_keys]
+    rect(MARGIN, y, CONTENT_W, 18, PALE)
+    txt(MARGIN + 10, y - 12, "REPORT & STUDY DETAILS", 8.2, True, BLUE)
+    y -= 18
+    row_h = 27
+    for i in range(0, len(summary), 2):
+        ensure(row_h + 6)
+        left = summary[i]
+        right = summary[i + 1] if i + 1 < len(summary) else ("", "")
+        rect(MARGIN, y, CONTENT_W, row_h, WHITE if (i // 2) % 2 else (0.985, 0.989, 0.994), LINE)
+        col_w = CONTENT_W / 2
+        txt(MARGIN + 10, y - 11, left[0].upper(), 6.8, True, MUTED)
+        txt(MARGIN + 10, y - 22, left[1][:48], 9, True, INK)
+        if right[0]:
+            txt(MARGIN + col_w + 10, y - 11, right[0].upper(), 6.8, True, MUTED)
+            txt(MARGIN + col_w + 10, y - 22, right[1][:48], 9, True, INK)
+        y -= row_h
+    y -= 13
+
+    # Display report sections as distinct cards with labels and readable spacing.
+    for title, content in sections:
+        title = title.upper().strip()
+        if title in ("REPORT OVERVIEW", "REPORT CONTENT", "AI MEDICAL IMAGING ANALYSIS REPORT"):
+            # The PDF already has a cover title. Keep all saved report body lines,
+            # including lines that follow the REPORT CONTENT wrapper.
+            pass
+        content = [x for x in content if x.upper() not in ("REPORT CONTENT", "AI MEDICAL IMAGING ANALYSIS REPORT")]
+        if not content:
+            continue
+        # Reclassify a few headings for friendlier display.
+        display_title = {"AI TRIAGE": "AI TRIAGE PRIORITY"}.get(title, title)
+        if display_title == "STUDY INFORMATION":
+            # Avoid duplicating metadata already shown in the summary card.
+            filtered = []
+            for item in content:
+                m = re.match(r"^(Study ID|Patient ID|Patient Name|Study Type|Study Date|Age|Gender):\s*(.*)$", item, re.I)
+                if m and m.group(1).casefold() in {"study id", "patient id", "patient name", "study type", "study date"}:
+                    continue
+                filtered.append(item)
+            content = filtered
+            if not content:
+                continue
+        ensure(36)
+        rect(MARGIN, y, CONTENT_W, 22, (0.91, 0.95, 0.98))
+        rect(MARGIN, y, 4, 22, TEAL)
+        txt(MARGIN + 12, y - 15, display_title, 9.2, True, NAVY)
+        y -= 31
+        for item in content:
+            item = item.strip()
+            if not item:
+                y -= 4
+                continue
+            # Prediction probabilities are formatted as clean, indented rows.
+            pred = re.match(r"^[•\-]?\s*(Fracture|Normal|Pneumonia|Pneumothorax|Pleural Effusion|Cardiomegaly):\s*(.*)$", item, re.I)
+            if pred:
+                ensure(23)
+                rect(MARGIN + 3, y + 3, CONTENT_W - 6, 20, (0.975, 0.980, 0.986), LINE)
+                txt(MARGIN + 12, y - 10, pred.group(1), 8.7, True, INK)
+                value = pred.group(2)
+                txt(MARGIN + 145, y - 10, value[:62], 8.2, False, MUTED)
+                y -= 23
+                continue
+            match = re.match(r"^([^:]{1,42}):\s*(.*)$", item)
+            if match:
+                key, value = match.group(1).strip(), match.group(2).strip()
+                # Make labels visually distinct; long values wrap beneath the label.
+                lines_for_value = wrap(value, 82)
+                block_h = max(15, 13 * len(lines_for_value))
+                ensure(block_h + 3)
+                txt(MARGIN + 5, y, key + ":", 8.6, True, BLUE)
+                if len(key) < 21 and len(value) < 70:
+                    txt(MARGIN + 130, y, value, 8.5, False, INK)
+                    y -= 16
+                else:
+                    y -= 13
+                    for part in lines_for_value:
+                        txt(MARGIN + 12, y, part, 8.4, False, INK)
+                        y -= 12
+                continue
+            paragraphs = wrap(item, 94)
+            ensure(12 * len(paragraphs) + 3)
+            for part in paragraphs:
+                txt(MARGIN + 6, y, part, 8.5, False, INK)
+                y -= 12
+        y -= 9
+
+    # Add a prominent safety notice, without changing the report's clinical content.
+    ensure(61)
+    rect(MARGIN, y, CONTENT_W, 48, (1.0, 0.97, 0.89), (0.92, 0.82, 0.59))
+    txt(MARGIN + 11, y - 16, "IMPORTANT · RESEARCH PROTOTYPE", 8.4, True, (0.48, 0.31, 0.08))
+    txt(MARGIN + 11, y - 31, "AI outputs are not a diagnosis. Final interpretation requires qualified human review.", 8.1, False, INK)
+    y -= 58
+    # Footer on final page
+    txt(MARGIN, 30, "Confidential medical information · For authorized review only", 7.2, False, MUTED)
+    txt(PAGE_W - MARGIN - 52, 30, f"Page {page_number}", 7.2, False, MUTED)
+    line(MARGIN, 43, PAGE_W - MARGIN, 43)
+    if commands:
+        page_streams.append(commands)
+
+    for stream_commands in page_streams:
+        stream = "\n".join(stream_commands).encode("cp1252", errors="replace")
+        stream_id = add_obj(b"<< /Length " + str(len(stream)).encode("ascii") + b" >>\nstream\n" + stream + b"\nendstream")
+        page_id = add_obj(
+            f"<< /Type /Page /Parent {pages_id} 0 R /MediaBox [0 0 {PAGE_W:.0f} {PAGE_H:.0f}] /Resources << /Font << /F1 {font_regular} 0 R /F2 {font_bold} 0 R >> >> /Contents {stream_id} 0 R >>".encode("ascii")
+        )
+        page_ids.append(page_id)
+    kids = " ".join(f"{pid} 0 R" for pid in page_ids)
+    objects[catalog_id - 1] = f"<< /Type /Catalog /Pages {pages_id} 0 R >>".encode("ascii")
+    objects[pages_id - 1] = f"<< /Type /Pages /Kids [{kids}] /Count {len(page_ids)} >>".encode("ascii")
+    pdf = bytearray(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")
+    offsets = [0]
+    for number, body in enumerate(objects, start=1):
+        offsets.append(len(pdf))
+        pdf.extend(f"{number} 0 obj\n".encode("ascii")); pdf.extend(body); pdf.extend(b"\nendobj\n")
+    xref = len(pdf)
+    pdf.extend(f"xref\n0 {len(objects)+1}\n".encode("ascii")); pdf.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        pdf.extend(f"{offset:010d} 00000 n \n".encode("ascii"))
+    pdf.extend(f"trailer\n<< /Size {len(objects)+1} /Root {catalog_id} 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode("ascii"))
+    return bytes(pdf)
+@app.get("/api/reports/{report_id}/pdf")
+def download_report_pdf(report_id: int, current_user: dict = Depends(get_current_user)):
+    """Download one saved report as a PDF, enforcing the same role scope as history."""
+    role = normalize_role(current_user.get("role", ""))
+    if role not in (ROLE_ADMIN, ROLE_RADIOLOGIST, ROLE_CLINICIAN):
+        raise HTTPException(status_code=403, detail="Your role is not permitted to download reports")
+    if role == ROLE_CLINICIAN and not current_user.get("patient_record_id"):
+        raise HTTPException(status_code=403, detail="This Clinician account is not linked to a patient record")
+
+    connection = get_connection()
+    try:
+        cursor = connection.cursor()
+        cursor.execute(
+            """
+            SELECT r.id AS report_id, r.study_id, r.report_status, r.report_text,
+                   r.generated_by, r.created_at, p.id AS patient_record_id,
+                   p.patient_id AS patient_code, p.name AS patient_name,
+                   s.study_type, s.study_date
+            FROM reports r
+            JOIN studies s ON s.id = r.study_id
+            JOIN patients p ON p.id = s.patient_id
+            WHERE r.id = ?
+            """,
+            (report_id,),
+        )
+        report = cursor.fetchone()
+        if report is None:
+            raise HTTPException(status_code=404, detail="Report not found")
+        report = dict(report)
+        if role == ROLE_CLINICIAN and report["patient_record_id"] != current_user["patient_record_id"]:
+            raise HTTPException(status_code=403, detail="You are not permitted to download this report")
+
+        # PDF presentation fallback for older reports whose report_text was empty.
+        # Prefer an existing saved 3D MRI report for the same study; this only reuses
+        # persisted output and never reruns inference or changes model workflows.
+        saved_report_text = str(report.get("report_text") or "").strip()
+        if not saved_report_text:
+            try:
+                cursor.execute(
+                    """SELECT report_text FROM reports
+                       WHERE study_id = ? AND id != ?
+                         AND TRIM(COALESCE(report_text, '')) != ''
+                         AND UPPER(report_text) LIKE '%MRI 3D AI SEGMENTATION REPORT%'
+                       ORDER BY id DESC LIMIT 1""",
+                    (report.get("study_id"), report.get("report_id")),
+                )
+                prior_mri_report = cursor.fetchone()
+            except Exception:
+                prior_mri_report = None
+            if prior_mri_report and str(prior_mri_report["report_text"] or "").strip():
+                saved_report_text = str(prior_mri_report["report_text"]).strip()
+
+        # If report content exists but has no triage section, append a previously
+        # saved study-level triage result when available. Do not invent a priority.
+        if not any(marker in saved_report_text.casefold() for marker in ("ai triage priority", "triage priority", "priority:")):
+            try:
+                cursor.execute(
+                    "SELECT priority, reason FROM triage_results WHERE study_id = ? ORDER BY id DESC LIMIT 1",
+                    (report.get("study_id"),),
+                )
+                saved_triage = cursor.fetchone()
+            except Exception:
+                saved_triage = None
+            if saved_triage:
+                saved_report_text = (saved_report_text + "\n\nAI TRIAGE PRIORITY\n"
+                    + "Priority: " + str(saved_triage["priority"] or "AI Inconclusive / Manual Review") + "\n"
+                    + "Reason: " + str(saved_triage["reason"] or "No triage reason was recorded.") + "\n"
+                    + "Workflow note: Operational research priority only; not a diagnosis or validated clinical urgency assessment. Qualified clinician review is required.")
+
+        report_lines = [
+            f"Report ID: {report.get('report_id')}",
+            f"Patient ID: {report.get('patient_code') or '—'}",
+            f"Patient Name: {report.get('patient_name') or '—'}",
+            f"Study ID: {report.get('study_id')}",
+            f"Study Type: {report.get('study_type') or '—'}",
+            f"Study Date: {report.get('study_date') or '—'}",
+            f"Report Status: {report.get('report_status') or '—'}",
+            f"Created: {_format_timestamp_ist(report.get('created_at'))}",
+            f"Generated By: {report.get('generated_by') or 'System'}",
+            "",
+            "REPORT CONTENT",
+            "",
+            (saved_report_text or "REPORT CONTENT UNAVAILABLE: No AI model report text was saved in this report record. Re-run the relevant model workflow and generate a new report; this PDF cannot reconstruct missing model output."),
+            "",
+            "Research Prototype Notice: This report is an informational AI-assisted research output. It is not a diagnosis and must be reviewed by an appropriately qualified clinician.",
+        ]
+        pdf_bytes = _build_report_pdf(report_lines)
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="medical_report_{report_id}.pdf"'},
+        )
+    finally:
+        connection.close()
+
+
+
 @app.get("/api/report-history")
 def get_report_history(current_user: dict = Depends(get_current_user)):
     role = normalize_role(current_user.get("role", ""))
@@ -3000,6 +3418,67 @@ def get_report_history(current_user: dict = Depends(get_current_user)):
         cursor.execute(query, params)
         reports = [dict(row) for row in cursor.fetchall()]
         return {"count": len(reports), "reports": reports}
+    finally:
+        connection.close()
+
+
+@app.delete("/api/reports/{report_id}")
+def delete_saved_report(
+    report_id: int,
+    current_user: dict = Depends(get_current_user),
+):
+    """Delete one saved report only; preserve its study, images, models, and other reports."""
+    role = normalize_role(current_user.get("role", ""))
+    if role != ROLE_ADMIN:
+        raise HTTPException(
+            status_code=403,
+            detail="Only an Administrator may delete saved reports.",
+        )
+
+    connection = get_connection()
+    try:
+        cursor = connection.cursor()
+        cursor.execute(
+            "SELECT id, study_id, report_status FROM reports WHERE id = ?",
+            (report_id,),
+        )
+        report = cursor.fetchone()
+        if report is None:
+            raise HTTPException(status_code=404, detail="Report not found.")
+
+        performed_by = (
+            current_user.get("full_name")
+            or current_user.get("username")
+            or "Administrator"
+        )
+        cursor.execute("DELETE FROM reports WHERE id = ?", (report_id,))
+        if cursor.rowcount != 1:
+            raise HTTPException(status_code=404, detail="Report not found.")
+
+        # Record the deletion for auditing without retaining the deleted report text.
+        cursor.execute(
+            """
+            INSERT INTO audit_logs (
+                action, entity_type, entity_id, performed_by, details
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                "report_deleted",
+                "report",
+                str(report_id),
+                performed_by,
+                f"Deleted report ID {report_id}; study ID {report['study_id']}; status={report['report_status']}",
+            ),
+        )
+        connection.commit()
+        return {"message": "Saved report deleted successfully.", "report_id": report_id}
+    except HTTPException:
+        connection.rollback()
+        raise
+    except Exception as exc:
+        connection.rollback()
+        print(f"Report deletion failed: {type(exc).__name__}: {exc}")
+        raise HTTPException(status_code=500, detail="Could not delete the saved report.") from exc
     finally:
         connection.close()
 
@@ -5345,6 +5824,152 @@ def get_ai_model(model_id: int,
 
 # ==================================================
 
+# ============================================================
+# YOLO X-RAY DETECTOR (ADDITIVE; DOES NOT REPLACE THE CLASSIFIER)
+# ============================================================
+
+YOLO_PYTHON = PROJECT_ROOT / ".venv-yolo" / "Scripts" / "python.exe"
+YOLO_DETECTOR_PATH = (
+    PROJECT_ROOT / "backend" / "models" / "xray_six_class"
+    / "fracture_detector_best.pt"
+)
+YOLO_OUTPUT_DIR = XAI_OUTPUT_DIR
+YOLO_CONFIDENCE_THRESHOLD = 0.25
+
+
+def _is_chest_xray_study(study_type):
+    value = str(study_type or "").strip().lower().replace("-", " ")
+    return "x ray" in value or "xray" in value or "chest x" in value
+
+
+def run_xray_yolo_detector(image_path, study_id):
+    output_filename = f"study_{study_id}_yolo_detections.jpg"
+    output_path = YOLO_OUTPUT_DIR / output_filename
+
+    if not YOLO_PYTHON.is_file():
+        return {
+            "available": False,
+            "status": "unavailable",
+            "detections": [],
+            "annotated_image": None,
+            "confidence_threshold": YOLO_CONFIDENCE_THRESHOLD,
+            "note": "YOLO virtual-environment Python was not found.",
+        }
+
+    if not YOLO_DETECTOR_PATH.is_file():
+        return {
+            "available": False,
+            "status": "unavailable",
+            "detections": [],
+            "annotated_image": None,
+            "confidence_threshold": YOLO_CONFIDENCE_THRESHOLD,
+            "note": "YOLO detector checkpoint was not found.",
+        }
+
+    helper_script = r'''
+import json
+import sys
+from pathlib import Path
+from ultralytics import YOLO
+from PIL import Image
+
+weights, source, output, threshold = sys.argv[1:5]
+threshold = float(threshold)
+model = YOLO(weights)
+results = model.predict(source=source, conf=threshold, device="cpu", verbose=False)
+result = results[0]
+detections = []
+if result.boxes is not None:
+    for box in result.boxes:
+        class_id = int(box.cls[0].item())
+        detections.append({
+            "class_id": class_id,
+            "class_name": str(model.names.get(class_id, class_id)),
+            "confidence": round(float(box.conf[0].item()), 4),
+            "box": [round(float(v), 2) for v in box.xyxy[0].tolist()],
+        })
+annotated = result.plot()
+Image.fromarray(annotated[:, :, ::-1]).save(output, quality=92)
+print(json.dumps({"task": str(model.task), "detections": detections}))
+'''
+
+    try:
+        completed = subprocess.run(
+            [
+                str(YOLO_PYTHON), "-c", helper_script,
+                str(YOLO_DETECTOR_PATH),
+                str(Path(image_path).resolve()),
+                str(output_path.resolve()),
+                str(YOLO_CONFIDENCE_THRESHOLD),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=180,
+            check=False,
+            cwd=str(PROJECT_ROOT),
+        )
+
+        if completed.returncode != 0:
+            return {
+                "available": False,
+                "status": "failed",
+                "detections": [],
+                "annotated_image": None,
+                "confidence_threshold": YOLO_CONFIDENCE_THRESHOLD,
+                "note": (completed.stderr or completed.stdout or
+                         "YOLO detector process failed.")[-2000:],
+            }
+
+        payload = None
+        for line in reversed(completed.stdout.splitlines()):
+            try:
+                candidate = json.loads(line)
+                if isinstance(candidate, dict) and "detections" in candidate:
+                    payload = candidate
+                    break
+            except json.JSONDecodeError:
+                continue
+
+        if payload is None or not output_path.is_file():
+            return {
+                "available": False,
+                "status": "failed",
+                "detections": [],
+                "annotated_image": None,
+                "confidence_threshold": YOLO_CONFIDENCE_THRESHOLD,
+                "note": "YOLO did not return a usable result and annotated image.",
+            }
+
+        return {
+            "available": True,
+            "status": "completed",
+            "task": payload.get("task", "detect"),
+            "detections": payload.get("detections", []),
+            "annotated_image": output_filename,
+            "confidence_threshold": YOLO_CONFIDENCE_THRESHOLD,
+            "note": "Research-only detector output; boxes and scores are not a diagnosis.",
+        }
+
+    except subprocess.TimeoutExpired:
+        return {
+            "available": False,
+            "status": "timeout",
+            "detections": [],
+            "annotated_image": None,
+            "confidence_threshold": YOLO_CONFIDENCE_THRESHOLD,
+            "note": "YOLO detector exceeded the 180-second time limit.",
+        }
+    except Exception as exc:
+        return {
+            "available": False,
+            "status": "failed",
+            "detections": [],
+            "annotated_image": None,
+            "confidence_threshold": YOLO_CONFIDENCE_THRESHOLD,
+            "note": f"YOLO detector failed: {exc}",
+        }
+
+
 @app.post("/api/analysis/{study_id}")
 
 def run_ai_analysis(study_id: int,
@@ -5367,7 +5992,7 @@ def run_ai_analysis(study_id: int,
 
             """
 
-            SELECT id
+            SELECT id, study_type
 
             FROM studies
 
@@ -5712,6 +6337,18 @@ def run_ai_analysis(study_id: int,
             },
 
             "predictions": stored_predictions,
+
+            "yolo_detection": (
+                run_xray_yolo_detector(str(image_path), study_id)
+                if _is_chest_xray_study(study["study_type"])
+                else {
+                    "available": False,
+                    "status": "skipped",
+                    "detections": [],
+                    "annotated_image": None,
+                    "note": "YOLO detector runs only for chest X-ray studies.",
+                }
+            ),
 
             "triage": {
                 "triage_id": triage_id,
@@ -6316,6 +6953,30 @@ async def classify_mri_2d_image(
         image.resize((224, 224)).save(original_buffer, format="PNG")
         original_base64 = base64.b64encode(original_buffer.getvalue()).decode("ascii")
 
+        # Class-aware operational label for this 2D MRI workflow only.
+        # This intentionally does not alter the model prediction or other modality workflows.
+        normalized_class = "".join(ch for ch in str(result.get("predicted_class", "")).lower() if ch.isalnum())
+        if normalized_class in {"notumor", "normal", "healthy", "negative"}:
+            triage_priority = "Low Priority"
+            triage_reason = (
+                f"The 2D MRI model output was “{result['predicted_class']}”. "
+                "This is a research workflow label, not a diagnosis; the score is not calibrated "
+                "and clinician review is still required."
+            )
+        elif normalized_class in {"glioma", "meningioma", "pituitary"}:
+            triage_priority = "High Priority"
+            triage_reason = (
+                f"The 2D MRI model output was “{result['predicted_class']}”; prioritize prompt "
+                "review by a qualified clinician. This is an operational research workflow label, "
+                "not a diagnosis or validated clinical urgency assessment."
+            )
+        else:
+            triage_priority = "AI Inconclusive / Manual Review"
+            triage_reason = (
+                f"The 2D MRI model output “{result.get('predicted_class') or '(missing class)'}” "
+                "does not map to a supported workflow category; arrange qualified manual review."
+            )
+
         note = (
             "Research output only. This classifier is intended for brain MRI images in its "
             "training domain, is not clinically validated, and must not be used as a diagnosis. "
@@ -6329,6 +6990,8 @@ async def classify_mri_2d_image(
             "Modality/workflow: MRI 2D image classification",
             f"Predicted model class: {result['predicted_class']}",
             f"Highest model score (not calibrated): {float(result['score']):.6f}",
+            f"2D MRI workflow priority: {triage_priority}",
+            f"2D MRI workflow triage reason: {triage_reason}",
             "Class scores:",
         ]
         report_lines.extend(
@@ -6346,6 +7009,8 @@ async def classify_mri_2d_image(
             "report_status": "Draft" if report_id is not None else None,
             "input_filename": Path(file.filename or "uploaded_image").name,
             "predicted_class": result["predicted_class"],
+            "triage_priority": triage_priority,
+            "triage_reason": triage_reason,
             "score_not_calibrated": result["score"],
             "probabilities": result["probabilities"],
             "original_image_png_base64": original_base64,
@@ -6484,6 +7149,29 @@ async def segment_mri_volume(
                 "and center-crop inference preprocessing require validation against the "
                 "training pipeline. A qualified clinician must interpret the results."
             )
+            # Match the existing 3D MRI result-panel priority rule without changing inference.
+            # This is an operational research label, not a validated clinical urgency score.
+            if auxiliary_probabilities:
+                top_class_name, top_class_probability = max(
+                    auxiliary_probabilities.items(), key=lambda item: float(item[1])
+                )
+                normalized_top_class = str(top_class_name).lower()
+                if any(term in normalized_top_class for term in ("glioma", "meningioma", "pituitary", "tumor", "tumour", "abnormal", "positive", "malignan")):
+                    triage_priority = "High Priority"
+                    triage_reason = f"The MRI 3D auxiliary classifier's highest class was {top_class_name} ({float(top_class_probability) * 100:.2f}%). Prompt qualified clinician review is required; this is not a diagnosis."
+                elif any(term in normalized_top_class for term in ("notumor", "no tumor", "normal", "healthy", "negative")):
+                    triage_priority = "Low Priority"
+                    triage_reason = f"The MRI 3D auxiliary classifier's highest class was {top_class_name} ({float(top_class_probability) * 100:.2f}%). This does not rule out disease; qualified clinician review is still required."
+                elif float(top_class_probability) >= 0.70:
+                    triage_priority = "High Priority"
+                    triage_reason = f"The MRI 3D auxiliary classifier's highest class was {top_class_name} ({float(top_class_probability) * 100:.2f}%); arrange prompt qualified review."
+                else:
+                    triage_priority = "Moderate Priority"
+                    triage_reason = f"The MRI 3D auxiliary classifier's highest class was {top_class_name} ({float(top_class_probability) * 100:.2f}%), but this research output does not establish clinical urgency. Qualified clinician review is required."
+            else:
+                triage_priority = "AI Inconclusive / Manual Review"
+                triage_reason = "No auxiliary classification scores were returned. Qualified manual review is required."
+
             report_lines = [
                 "MRI 3D AI SEGMENTATION REPORT (DRAFT)",
                 "====================================",
@@ -6504,7 +7192,15 @@ async def segment_mri_volume(
                 f"- {name}: {float(score):.6f}"
                 for name, score in auxiliary_probabilities.items()
             )
-            report_lines.extend(["", f"Research limitation: {note}"])
+            report_lines.extend([
+                "",
+                "AI TRIAGE PRIORITY",
+                f"Priority: {triage_priority}",
+                f"Reason: {triage_reason}",
+                "Workflow note: Operational research priority only; not a diagnosis or validated clinical urgency assessment. Qualified clinician review is required.",
+                "",
+                f"Research limitation: {note}",
+            ])
             report_id = save_mri_draft_report(study_id, current_user, "\n".join(report_lines))
 
             return {
@@ -6523,6 +7219,8 @@ async def segment_mri_volume(
                 "segmentation_overlay_png": overlay_preview_url,
                 "segmentation_mask_png": mask_preview_url,
                 "auxiliary_class_probabilities": auxiliary_probabilities,
+                "triage_priority": triage_priority,
+                "triage_reason": triage_reason,
                 "model_device": str(device),
                 "note": note,
             }
@@ -6543,13 +7241,19 @@ async def segment_mri_volume(
             await upload.close()
 
 
+
+
+
+
+
+
+
+
+
 # ============================================================
 # 2D BRAIN CT HEMORRHAGE PREDICTION (SEPARATE FROM 3D CT)
-# Add this block near the END of main.py, after existing routes.
-# Do not replace or edit the existing DICOM CT endpoints.
+# Additive route only. Existing DICOM CT routes/model remain unchanged.
 # ============================================================
-
-# Reuse the same CT model parent directory already configured above.
 BRAIN_CT_MODEL_DIR = CT_MODEL_DIR.parent / "brain_hemorrhage_2d"
 if str(BRAIN_CT_MODEL_DIR) not in sys.path:
     sys.path.insert(0, str(BRAIN_CT_MODEL_DIR))
@@ -6577,17 +7281,15 @@ async def predict_brain_ct_hemorrhage_endpoint(
 
     try:
         image_bytes = await file.read()
-        # Guard against accidentally uploading extremely large files.
         if len(image_bytes) > 20 * 1024 * 1024:
             raise HTTPException(
                 status_code=413,
                 detail="Image is too large. Maximum upload size is 20 MB.",
             )
 
-        # Local import prevents any effect on backend startup when the model
-        # checkpoint is not present yet.
+        # Import only for this request so the existing backend startup and
+        # DICOM CT workflow do not depend on the separate 2D checkpoint.
         from brain_ct_hemorrhage_service import predict_brain_ct_hemorrhage
-
         return predict_brain_ct_hemorrhage(image_bytes, original_name)
 
     except HTTPException:
@@ -6605,4 +7307,3 @@ async def predict_brain_ct_hemorrhage_endpoint(
         ) from exc
     finally:
         await file.close()
-

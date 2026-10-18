@@ -1,0 +1,8 @@
+{
+  "Cardiomegaly": 0.16,
+  "Pleural Effusion": 0.28,
+  "Pneumothorax": 0.15,
+  "Pneumonia": 0.05,
+  "Normal": 0.42,
+  "Fracture": 0.22
+}

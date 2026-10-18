@@ -1,0 +1,16 @@
+{
+  "project": "AI-Based Medical Imaging Triage & Explainable Abnormality Detection",
+  "classifier_architecture": "resnet18",
+  "classifier_labels": [
+    "Cardiomegaly",
+    "Pleural Effusion",
+    "Pneumothorax",
+    "Pneumonia",
+    "Normal",
+    "Fracture"
+  ],
+  "detector_architecture": "YOLO11n",
+  "thresholds_file": "thresholds.json",
+  "explainability": "Grad-CAM on ResNet18 layer4[-1]",
+  "intended_use": "Research prototype only; not for clinical diagnosis"
+}

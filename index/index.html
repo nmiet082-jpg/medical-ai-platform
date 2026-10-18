@@ -37,6 +37,11 @@
             font-family: inherit;
         }
 
+        .password-input-wrap { display:flex; align-items:stretch; gap:8px; width:100%; }
+        .password-input-wrap input { flex:1; min-width:0; }
+        .password-toggle { border:1px solid #cbd5e1; border-radius:8px; padding:0 12px; background:#f8fafc; color:#334155; cursor:pointer; font-weight:600; white-space:nowrap; }
+        .password-toggle:hover { background:#e2e8f0; }
+
         /* =====================================================
            LOGIN PAGE
         ===================================================== */
@@ -410,6 +415,56 @@
             margin-bottom: 25px;
         }
 
+
+
+        /* High-priority queue on the main dashboard */
+        .high-priority-section {
+            margin: 24px 0 28px;
+            padding: 22px;
+            border: 1px solid #fecaca;
+            border-radius: 14px;
+            background: #fffafa;
+            box-shadow: 0 5px 15px rgba(127, 29, 29, 0.05);
+        }
+        .high-priority-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-bottom: 8px;
+        }
+        .high-priority-header h2 { margin: 0; color: #991b1b; font-size: 21px; }
+        .high-priority-count {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 34px;
+            height: 34px;
+            padding: 0 10px;
+            border-radius: 999px;
+            background: #fee2e2;
+            color: #991b1b;
+            font-weight: 800;
+        }
+        .high-priority-note { margin: 0 0 16px; color: #7f1d1d; font-size: 14px; }
+        .high-priority-table-wrap { width: 100%; overflow-x: auto; }
+        .high-priority-table { width: 100%; border-collapse: collapse; background: #fff; }
+        .high-priority-table th, .high-priority-table td {
+            padding: 12px 14px; text-align: left; border-bottom: 1px solid #fee2e2;
+            vertical-align: top; white-space: normal;
+        }
+        .high-priority-table th { background: #fef2f2; color: #7f1d1d; font-weight: 700; }
+        .high-priority-badge {
+            display: inline-block; padding: 5px 9px; border-radius: 999px;
+            background: #fee2e2; color: #991b1b; font-size: 12px; font-weight: 800;
+        }
+        .high-priority-empty { padding: 18px; color: #475569; background: #fff; border-radius: 8px; }
+        @media (max-width: 700px) {
+            .high-priority-section { padding: 15px; }
+            .high-priority-table th, .high-priority-table td { padding: 9px; }
+        }
+
         .stat-card {
             background: white;
 
@@ -777,6 +832,79 @@
 
         }
 
+
+
+        /* Dashboard redesign inspired by the supplied triage-dashboard reference.
+           Visual styling and read-only report-history summaries only. */
+        #dashboardPage.page { max-width: 1580px; padding: 28px clamp(16px, 2.6vw, 38px) 42px; }
+        #dashboardPage .page-title { margin-bottom: 18px; }
+        #dashboardPage .page-title h1 { font-size: clamp(27px, 2.2vw, 34px); letter-spacing: -.7px; font-weight: 800; }
+        #dashboardPage .page-title p { font-size: 14px; }
+        #dashboardPage .welcome-card {
+            position: relative; overflow: hidden; isolation: isolate;
+            min-height: 138px; padding: 27px 30px; margin-bottom: 22px;
+            border: 1px solid rgba(255,255,255,.2); border-radius: 17px;
+            background: linear-gradient(112deg, #10243f 0%, #174b83 58%, #087f8c 100%);
+            box-shadow: 0 12px 28px rgba(15, 42, 75, .14);
+        }
+        #dashboardPage .welcome-card::after { content:""; position:absolute; z-index:-1; width:230px; height:230px; right:-45px; top:-125px; border:1px solid rgba(255,255,255,.18); border-radius:50%; box-shadow:0 0 0 26px rgba(255,255,255,.035),0 0 0 55px rgba(255,255,255,.025); }
+        #dashboardPage .welcome-card h2 { font-size: clamp(24px, 2.4vw, 32px); margin-bottom: 8px; letter-spacing:-.5px; }
+        #dashboardPage .welcome-card p { font-size: 15px; line-height:1.6; color:#e4efff; }
+        #dashboardPage .triage-kpi-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:15px; margin:0 0 22px; }
+        #dashboardPage .triage-kpi { min-width:0; position:relative; padding:18px 19px; background:#fff; border:1px solid #e2e8f0; border-radius:13px; box-shadow:0 4px 14px rgba(15,23,42,.035); }
+        #dashboardPage .triage-kpi::before { content:""; position:absolute; left:0; top:12px; bottom:12px; width:4px; border-radius:0 4px 4px 0; background:#64748b; }
+        #dashboardPage .triage-kpi.total::before { background:#2563eb; }
+        #dashboardPage .triage-kpi.high { background:#fff8f8; border-color:#f5d2d2; }
+        #dashboardPage .triage-kpi.high::before { background:#dc2626; }
+        #dashboardPage .triage-kpi.moderate { background:#fffbeb; border-color:#f6e5b7; }
+        #dashboardPage .triage-kpi.moderate::before { background:#d97706; }
+        #dashboardPage .triage-kpi.low { background:#f2fbf7; border-color:#cdeee0; }
+        #dashboardPage .triage-kpi.low::before { background:#059669; }
+        #dashboardPage .triage-kpi-label { color:#64748b; font-size:12px; font-weight:700; letter-spacing:.45px; text-transform:uppercase; margin-bottom:10px; }
+        #dashboardPage .triage-kpi-number { font-size:30px; line-height:1.1; font-weight:800; letter-spacing:-.7px; color:#0f172a; }
+        #dashboardPage .triage-kpi.high .triage-kpi-number { color:#b91c1c; }
+        #dashboardPage .triage-kpi.moderate .triage-kpi-number { color:#a16207; }
+        #dashboardPage .triage-kpi.low .triage-kpi-number { color:#047857; }
+        #dashboardPage .triage-kpi-foot { margin-top:8px; color:#64748b; font-size:11px; line-height:1.45; }
+        #dashboardPage .dashboard-insights-grid { display:grid; grid-template-columns:minmax(0,1.65fr) minmax(260px,.85fr); gap:18px; align-items:stretch; margin-bottom:22px; }
+        /* Hide only the Recent Cases and Priority Distribution panels on Dashboard. Keep their DOM and scripts intact for compatibility. */
+        #dashboardPage .dashboard-insights-grid { display: none !important; }
+        #dashboardPage .dashboard-panel { min-width:0; background:#fff; border:1px solid #e2e8f0; border-radius:14px; padding:19px; box-shadow:0 5px 17px rgba(15,23,42,.035); }
+        #dashboardPage .dashboard-panel-heading { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:15px; }
+        #dashboardPage .dashboard-panel-heading h2 { margin:0; font-size:17px; color:#0f172a; letter-spacing:-.25px; }
+        #dashboardPage .dashboard-panel-subtitle { color:#94a3b8; font-size:12px; margin-top:5px; line-height:1.45; }
+        #dashboardPage .dashboard-table-wrap { width:100%; overflow-x:auto; }
+        #dashboardPage .dashboard-recent-table { width:100%; min-width:570px; border-collapse:collapse; }
+        #dashboardPage .dashboard-recent-table th { padding:10px 9px; text-align:left; background:#f8fafc; color:#64748b; font-size:10px; text-transform:uppercase; letter-spacing:.45px; border-bottom:1px solid #e8edf4; }
+        #dashboardPage .dashboard-recent-table td { padding:12px 9px; font-size:12px; color:#334155; border-bottom:1px solid #eef2f7; vertical-align:middle; }
+        #dashboardPage .dashboard-recent-table tbody tr:last-child td { border-bottom:0; }
+        #dashboardPage .dashboard-recent-table tbody tr:hover td { background:#f8fbff; }
+        #dashboardPage .dashboard-priority-pill { display:inline-block; white-space:nowrap; padding:4px 8px; border-radius:999px; font-size:10px; font-weight:800; }
+        #dashboardPage .dashboard-priority-pill.high { background:#fee2e2; color:#991b1b; }
+        #dashboardPage .dashboard-priority-pill.moderate { background:#fef3c7; color:#92400e; }
+        #dashboardPage .dashboard-priority-pill.low { background:#d1fae5; color:#065f46; }
+        #dashboardPage .dashboard-priority-pill.unknown { background:#e2e8f0; color:#475569; }
+        #dashboardPage .dashboard-chart-layout { display:flex; align-items:center; justify-content:center; gap:20px; min-height:205px; }
+        #dashboardPage .priority-donut { flex:0 0 auto; width:148px; height:148px; border-radius:50%; display:grid; place-items:center; background:conic-gradient(#10b981 0deg 360deg); position:relative; }
+        #dashboardPage .priority-donut::before { content:""; width:100px; height:100px; background:#fff; border-radius:50%; position:absolute; }
+        #dashboardPage .priority-donut-center { z-index:1; text-align:center; color:#0f172a; display:flex; flex-direction:column; align-items:center; gap:3px; }
+        #dashboardPage .priority-donut-total { font-size:23px; font-weight:800; letter-spacing:-.5px; }
+        #dashboardPage .priority-donut-caption { color:#64748b; font-size:10px; }
+        #dashboardPage .priority-legend { display:flex; flex-direction:column; gap:13px; min-width:90px; }
+        #dashboardPage .priority-legend-row { display:grid; grid-template-columns:9px 1fr auto; gap:7px; align-items:center; font-size:11px; color:#475569; }
+        #dashboardPage .priority-legend-dot { width:9px; height:9px; border-radius:50%; }
+        #dashboardPage .priority-legend-value { font-weight:800; color:#0f172a; }
+        #dashboardPage .dashboard-muted-message { padding:20px 12px; color:#64748b; font-size:13px; line-height:1.6; text-align:center; }
+        #dashboardPage .high-priority-section { margin-top:22px; border-top-width:4px; border-radius:15px; box-shadow:0 8px 22px rgba(127,29,29,.05); }
+        #dashboardPage .high-priority-header h2 { font-size:20px; }
+        #dashboardPage .high-priority-table-wrap { border-radius:10px; }
+        #dashboardPage .high-priority-table { min-width:760px; }
+        #dashboardPage .high-priority-table th { font-size:11px; text-transform:uppercase; letter-spacing:.35px; }
+        #dashboardPage .stat-card { box-shadow:0 4px 14px rgba(15,23,42,.035); }
+        @media (max-width:1050px) { #dashboardPage .triage-kpi-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } #dashboardPage .dashboard-insights-grid { grid-template-columns:1fr; } }
+        @media (max-width:650px) { #dashboardPage.page { padding:20px 13px 30px; } #dashboardPage .triage-kpi-grid { gap:10px; } #dashboardPage .triage-kpi { padding:15px; } #dashboardPage .triage-kpi-number { font-size:26px; } #dashboardPage .dashboard-panel { padding:14px; } #dashboardPage .dashboard-chart-layout { gap:13px; } #dashboardPage .priority-donut { width:128px; height:128px; } #dashboardPage .priority-donut::before { width:86px; height:86px; } }
+        @media (prefers-reduced-motion:reduce) { #dashboardPage .triage-kpi, #dashboardPage .stat-card { transition:none!important; } }
+
     </style>
 
 </head>
@@ -826,12 +954,13 @@
                         Password
                     </label>
 
-                    <input
-                        type="password"
-                        id="password"
-                        placeholder="Enter password"
-                        required
-                    >
+                    <div class="password-input-wrap">
+                        <input type="password" id="password" placeholder="Enter password"
+                               autocomplete="current-password" required>
+                        <button type="button" class="password-toggle"
+                                aria-controls="password" aria-pressed="false"
+                                onclick="togglePasswordVisibility('password', this)">Show</button>
+                    </div>
 
                 </div>
                 <button
@@ -1015,6 +1144,78 @@
                     </p>
 
                 </div>
+
+
+
+                <div class="triage-kpi-grid" aria-label="Saved report triage summary">
+                    <article class="triage-kpi total">
+                        <div class="triage-kpi-label">Total Cases</div>
+                        <div class="triage-kpi-number" id="dashboardTotalCases">—</div>
+                        <div class="triage-kpi-foot">Saved reports in your permitted report history</div>
+                    </article>
+                    <article class="triage-kpi high">
+                        <div class="triage-kpi-label">High Priority</div>
+                        <div class="triage-kpi-number" id="dashboardHighCases">—</div>
+                        <div class="triage-kpi-foot">Reports explicitly marked high priority</div>
+                    </article>
+                    <article class="triage-kpi moderate">
+                        <div class="triage-kpi-label">Moderate Priority</div>
+                        <div class="triage-kpi-number" id="dashboardModerateCases">—</div>
+                        <div class="triage-kpi-foot">Reports explicitly marked moderate priority</div>
+                    </article>
+                    <article class="triage-kpi low">
+                        <div class="triage-kpi-label">Low Priority</div>
+                        <div class="triage-kpi-number" id="dashboardLowCases">—</div>
+                        <div class="triage-kpi-foot">Reports explicitly marked low priority</div>
+                    </article>
+                </div>
+
+                <div class="dashboard-insights-grid">
+                    <section class="dashboard-panel" aria-labelledby="dashboardRecentCasesHeading">
+                        <div class="dashboard-panel-heading">
+                            <div><h2 id="dashboardRecentCasesHeading">Recent Cases</h2><p class="dashboard-panel-subtitle">Latest saved reports from accessible report history</p></div>
+                            <button type="button" class="btn btn-secondary btn-small" onclick="showPage('reportHistoryPage', document.getElementById('reportHistoryNav'))">View all</button>
+                        </div>
+                        <div id="dashboardRecentCasesMessage" class="dashboard-muted-message" role="status">Loading recent cases…</div>
+                        <div id="dashboardRecentCasesWrap" class="dashboard-table-wrap" style="display:none;">
+                            <table class="dashboard-recent-table">
+                                <thead><tr><th>Patient ID</th><th>Study</th><th>Priority</th><th>AI Result</th><th>Status</th></tr></thead>
+                                <tbody id="dashboardRecentCasesBody"></tbody>
+                            </table>
+                        </div>
+                    </section>
+                    <section class="dashboard-panel" aria-labelledby="dashboardPriorityDistributionHeading">
+                        <div class="dashboard-panel-heading"><div><h2 id="dashboardPriorityDistributionHeading">Priority Distribution</h2><p class="dashboard-panel-subtitle">Based only on explicit priority labels in saved reports</p></div></div>
+                        <div class="dashboard-chart-layout">
+                            <div id="dashboardPriorityDonut" class="priority-donut" role="img" aria-label="Priority distribution chart">
+                                <div class="priority-donut-center"><span id="dashboardDonutTotal" class="priority-donut-total">—</span><span class="priority-donut-caption">Total cases</span></div>
+                            </div>
+                            <div class="priority-legend" aria-label="Priority legend">
+                                <div class="priority-legend-row"><span class="priority-legend-dot" style="background:#dc2626"></span><span>High</span><span id="dashboardHighLegend" class="priority-legend-value">—</span></div>
+                                <div class="priority-legend-row"><span class="priority-legend-dot" style="background:#d97706"></span><span>Moderate</span><span id="dashboardModerateLegend" class="priority-legend-value">—</span></div>
+                                <div class="priority-legend-row"><span class="priority-legend-dot" style="background:#10b981"></span><span>Low</span><span id="dashboardLowLegend" class="priority-legend-value">—</span></div>
+                                <div class="priority-legend-row"><span class="priority-legend-dot" style="background:#cbd5e1"></span><span>Unclassified</span><span id="dashboardUnknownLegend" class="priority-legend-value">—</span></div>
+                            </div>
+                        </div>
+                        <p style="margin-top:8px;color:#94a3b8;font-size:11px;line-height:1.5;">Research workflow summary only; priority labels are not a validated clinical urgency assessment.</p>
+                    </section>
+                </div>
+
+                <section id="dashboardHighPrioritySection" class="high-priority-section" aria-labelledby="highPriorityHeading">
+                    <div class="high-priority-header">
+                        <h2 id="highPriorityHeading">🚨 High-Priority Patients</h2>
+                        <span id="highPriorityCount" class="high-priority-count" aria-label="Number of high-priority reports">0</span>
+                    </div>
+                    <p class="high-priority-note">Patients with a saved report explicitly marked High Priority, collected from report history. This is a research-workflow queue, not a clinical diagnosis or validated urgency assessment.</p>
+                    <div id="highPriorityReportsMessage" class="high-priority-empty" role="status">Loading high-priority reports…</div>
+                    <div id="highPriorityTableWrap" class="high-priority-table-wrap" style="display:none;">
+                        <table class="high-priority-table">
+                            <thead><tr><th>Patient ID</th><th>Patient Name</th><th>Study ID</th><th>Study Type</th><th>Study Date</th><th>Report Status</th><th>Priority</th></tr></thead>
+                            <tbody id="highPriorityReportsBody"></tbody>
+                        </table>
+                    </div>
+                    <button type="button" class="btn btn-primary" style="margin-top:14px;" onclick="showPage('reportHistoryPage', document.getElementById('reportHistoryNav'))">Open Report History</button>
+                </section>
 
                 <div class="stats-grid">
 
@@ -1390,30 +1591,10 @@
                             class="form-control"
                             onchange="updateStudyTypeUI()"
                         >
-                            <option value="Chest X-Ray">
-                                Chest X-Ray
-                            </option>
-
-                            <option value="CT Scan">
-                                CT Scan
-                            </option>
-
-                            <option value="2D Brain CT Hemorrhage">
-                                2D Brain CT — Hemorrhage Analysis
-                            </option>
-
-                            <option value="Breast Ultrasound">
-                                Breast Ultrasound
-                            </option>
-
-                            <option value="Abdominal Ultrasound">
-
-                                Abdominal Ultrasound
-
-                            </option>
-                            <option value="MRI">
-                                MRI
-                            </option>
+                            <option value="Chest X-Ray">Chest X-Ray</option>
+                            <option value="CT Scan">CT Scan</option>
+                            <option value="Ultrasound">Ultrasound</option>
+                            <option value="MRI">MRI</option>
                         </select>
 
                     </div>
@@ -1423,6 +1604,25 @@
                         <select id="mriStudyType" onchange="updateStudyTypeUI()">
                             <option value="2D">MRI 2D — Single image classification</option>
                             <option value="3D">MRI 3D — Four-volume segmentation</option>
+                        </select>
+                        <p id="mriUploadHelp" style="margin:8px 0 14px;color:#64748b;font-size:14px;">
+                            Upload your MRI image or MRI scan files.
+                        </p>
+                    </div>
+
+                    <div class="form-group" id="ctTypeGroup" style="display:none;">
+                        <label for="ctStudyType">CT Scan Type</label>
+                        <select id="ctStudyType" class="form-control" onchange="updateStudyTypeUI()">
+                            <option value="2D">2D Brain CT Scan</option>
+                            <option value="3D" selected>3D Lungs CT Scan</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group" id="ultrasoundTypeGroup" style="display:none;">
+                        <label for="ultrasoundStudyType">Ultrasound Type</label>
+                        <select id="ultrasoundStudyType" class="form-control" onchange="syncUltrasoundStudyType()">
+                            <option value="Breast Ultrasound">Breast Ultrasound</option>
+                            <option value="Abdominal Ultrasound">Abdominal Ultrasound</option>
                         </select>
                     </div>
 
@@ -1461,7 +1661,7 @@
                         </div>
 
                         <p id="medicalImageHelp" style="margin:8px 0 14px;color:#64748b;font-size:14px;">
-                            For CT Scan, select a folder containing the complete DICOM series (.dcm files). Other modalities continue to use their supported image files.
+                            Upload your Chest X-Ray image.
                         </p>
 
                         <input
@@ -1501,7 +1701,7 @@
                 <div class="section-card" id="brainCtHemorrhageUploadCard" style="display:none;">
                     <h2>🧠 2D Brain CT Hemorrhage Analysis</h2>
                     <p style="color:#64748b;line-height:1.6;margin-bottom:16px;">
-                        Upload one 2D brain CT slice (JPG, JPEG, or PNG). This separate model is not the DICOM folder / 3D lung CT model. Do not upload an MRI image here.
+                        Upload your 2D Brain CT image (JPG, JPEG, or PNG).
                     </p>
                     <div class="upload-box">
                         <div class="upload-icon">🧠</div>
@@ -1734,6 +1934,22 @@
 
                 <div class="section-card">
                     <h2>Previous Reports</h2>
+                    <div class="form-grid" style="margin-top:12px; margin-bottom:8px;">
+                        <div class="form-group" style="margin-bottom:10px;">
+                            <label for="previousReportSearch">Search Reports</label>
+                            <input type="search" id="previousReportSearch" placeholder="Search report ID, status, or creator..." oninput="filterPreviousReports()" autocomplete="off">
+                        </div>
+                        <div class="form-group" style="margin-bottom:10px;">
+                            <label for="previousReportStatusFilter">Filter by Status</label>
+                            <select id="previousReportStatusFilter" onchange="filterPreviousReports()">
+                                <option value="">All statuses</option>
+                                <option value="draft">Draft</option>
+                                <option value="final">Final</option>
+                                <option value="reviewed">Reviewed</option>
+                            </select>
+                        </div>
+                    </div>
+                    <p id="previousReportFilterMessage" style="display:none;color:#64748b;margin:0 0 12px;" aria-live="polite"></p>
                     <div id="previousReports" style="color:#64748b;">No reports loaded yet.</div>
                 </div>
 
@@ -1797,6 +2013,31 @@
                     <p id="reportHistoryMessage" style="margin:15px 0; color:#64748b;" aria-live="polite">
                         Click Refresh to load saved reports.
                     </p>
+                    <div class="form-grid" style="margin-bottom:8px;">
+                        <div class="form-group" style="margin-bottom:10px;">
+                            <label for="reportHistorySearch">Search Saved Reports</label>
+                            <input type="search" id="reportHistorySearch" placeholder="Search patient, study, or report ID..." oninput="filterReportHistory()" autocomplete="off">
+                        </div>
+                        <div class="form-group" style="margin-bottom:10px;">
+                            <label for="reportHistoryStudyTypeFilter">Filter by Study Type</label>
+                            <select id="reportHistoryStudyTypeFilter" onchange="filterReportHistory()">
+                                <option value="">All study types</option>
+                                <option value="mri">MRI</option>
+                                <option value="ct">CT Scan</option>
+                                <option value="x-ray">X-Ray</option>
+                                <option value="ultrasound">Ultrasound</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin-bottom:10px;">
+                            <label for="reportHistoryStatusFilter">Filter by Status</label>
+                            <select id="reportHistoryStatusFilter" onchange="filterReportHistory()">
+                                <option value="">All statuses</option>
+                                <option value="draft">Draft</option>
+                                <option value="final">Final</option>
+                                <option value="reviewed">Reviewed</option>
+                            </select>
+                        </div>
+                    </div>
 
                     <div class="table-container">
                         <table>
@@ -1891,9 +2132,14 @@
 
                             <div class="form-group">
                                 <label for="adminPassword">Password</label>
-                                <input type="password" id="adminPassword"
-                                       placeholder="Minimum 8 characters"
-                                       minlength="8" required>
+                                <div class="password-input-wrap">
+                                    <input type="password" id="adminPassword"
+                                           placeholder="Minimum 8 characters"
+                                           autocomplete="new-password" minlength="8" required>
+                                    <button type="button" class="password-toggle"
+                                            aria-controls="adminPassword" aria-pressed="false"
+                                            onclick="togglePasswordVisibility('adminPassword', this)">Show</button>
+                                </div>
                             </div>
 
                             <div class="form-group">
@@ -1953,6 +2199,24 @@
 
                     </div>
 
+                    <div class="form-grid" style="margin-top:20px; margin-bottom:8px;">
+                        <div class="form-group" style="margin-bottom:10px;">
+                            <label for="adminUserSearch">Search by User ID</label>
+                            <input type="search" id="adminUserSearch" placeholder="Enter User ID..." oninput="filterAdminUsers()" autocomplete="off">
+                        </div>
+                        <div class="form-group" style="margin-bottom:10px;">
+                            <label for="adminUserRoleFilter">Filter by Role</label>
+                            <select id="adminUserRoleFilter" onchange="filterAdminUsers()">
+                                <option value="">All roles</option>
+                                <option value="Administrator">Administrator</option>
+                                <option value="Radiologist">Radiologist</option>
+                                <option value="Technician">Technician</option>
+                                <option value="Clinician">Clinician</option>
+                                <option value="AI/ML Engineer">AI/ML Engineer</option>
+                            </select>
+                        </div>
+                    </div>
+                    <p id="adminUserFilterMessage" style="display:none;color:#64748b;margin:0 0 12px;" aria-live="polite"></p>
                     <div class="table-container" style="margin-top:20px;">
                         <table>
                             <thead>
@@ -1962,11 +2226,13 @@
                                     <th>Email</th>
                                     <th>Role</th>
                                     <th>Status</th>
+                                    <th>Password Status</th>
+                                    <th>Actions</th>
                                 </tr>
                             </thead>
                             <tbody id="adminUsersTableBody">
                                 <tr>
-                                    <td colspan="5"
+                                    <td colspan="7"
                                         style="text-align:center; padding:30px;">
                                         Click Refresh to load users.
                                     </td>
@@ -2071,6 +2337,16 @@ let currentCTSeriesId =
         /* =====================================================
            LOGIN
         ===================================================== */
+
+        function togglePasswordVisibility(inputId, button) {
+            const input = document.getElementById(inputId);
+            if (!input || !button) return;
+            const showPassword = input.type === "password";
+            input.type = showPassword ? "text" : "password";
+            button.textContent = showPassword ? "Hide" : "Show";
+            button.setAttribute("aria-pressed", showPassword ? "true" : "false");
+            button.setAttribute("aria-label", (showPassword ? "Hide" : "Show") + " password");
+        }
 
         async function login(event) {
 
@@ -2190,6 +2466,7 @@ let currentCTSeriesId =
                 if (!isClinicianRole()) {
                     loadPatientsFromBackend();
                     updateDashboard();
+                    loadDashboardHighPriorityReports();
                 }
 
             } catch (error) {
@@ -2338,6 +2615,22 @@ let currentCTSeriesId =
 
         }
 
+        function formatTimestampIST(value) {
+            if (value === null || value === undefined || String(value).trim() === "") return "—";
+            const raw = String(value).trim();
+            // SQLite CURRENT_TIMESTAMP values are UTC text without an offset.
+            const normalized = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(raw)
+                ? raw
+                : raw.replace(" ", "T") + "Z";
+            const parsed = new Date(normalized);
+            if (Number.isNaN(parsed.getTime())) return raw;
+            const parts = new Intl.DateTimeFormat("en-GB", {
+                timeZone: "Asia/Kolkata", day: "2-digit", month: "2-digit", year: "numeric",
+                hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23"
+            }).formatToParts(parsed).reduce(function(acc, part) { acc[part.type] = part.value; return acc; }, {});
+            return parts.day + "-" + parts.month + "-" + parts.year + " " + parts.hour + ":" + parts.minute + ":" + parts.second + " IST";
+        }
+
         async function loadAuditLogs() {
             const message = document.getElementById("auditLogsMessage");
             const tableBody = document.getElementById("auditLogsTableBody");
@@ -2379,7 +2672,7 @@ let currentCTSeriesId =
                             log.entity_id,
                             log.performed_by,
                             log.details,
-                            log.created_at
+                            formatTimestampIST(log.created_at)
                         ].forEach(value => {
                             const cell = document.createElement("td");
                             cell.textContent = value == null ? "—" : String(value);
@@ -2473,9 +2766,9 @@ let currentCTSeriesId =
             if (
                 pageId === "dashboardPage"
             ) {
-
                 updateDashboard();
-
+                loadDashboardTriageOverview();
+                loadDashboardHighPriorityReports();
             }
 
             if (
@@ -3377,19 +3670,46 @@ let currentCTSeriesId =
         ===================================================== */
 
         function updateStudyTypeUI() {
-            const studyType = document.getElementById("imageStudyType").value;
+            const parentType = document.getElementById("imageStudyType").value;
+            const studyType = getEffectiveMedicalStudyType();
             const mriTypeGroup = document.getElementById("mriTypeGroup");
             const mri2DBox = document.getElementById("mri2DUploadBox");
             const mri3DBox = document.getElementById("mri3DUploadBox");
             const standardBox = document.getElementById("standardMedicalUploadBox");
             const fileInput = document.getElementById("medicalImage");
             const validationMessage = document.getElementById("medicalImageValidation");
-            const isMRI = studyType === "MRI";
-            const isBrainCT = studyType === "2D Brain CT Hemorrhage";
+            const helpText = document.getElementById("medicalImageHelp");
+            const mriHelpText = document.getElementById("mriUploadHelp");
+            const isMRI = parentType === "MRI";
+            const ctTypeGroup = document.getElementById("ctTypeGroup");
+            const ctStudyType = document.getElementById("ctStudyType");
+            const ultrasoundTypeGroup = document.getElementById("ultrasoundTypeGroup");
+            const isCTScan = parentType === "CT Scan";
+            const selectedCTType = ctStudyType ? ctStudyType.value : "3D";
+            const isBrainCT = isCTScan && selectedCTType === "2D";
+            const isUltrasound = parentType === "Ultrasound";
+            const ultrasoundStudyType = document.getElementById("ultrasoundStudyType");
             const brainCTBox = document.getElementById("brainCtHemorrhageUploadCard");
             const generalUploadButton = document.querySelector('#imagesPage button[onclick="uploadMedicalImage()"]');
 
+            if (ctTypeGroup) ctTypeGroup.style.display = isCTScan ? "block" : "none";
+            if (ultrasoundTypeGroup) ultrasoundTypeGroup.style.display = isUltrasound ? "block" : "none";
+            if (mriHelpText) mriHelpText.style.display = isMRI ? "block" : "none";
             if (generalUploadButton) generalUploadButton.style.display = isBrainCT ? "none" : "inline-flex";
+
+            if (helpText) {
+                const uploadPrompts = {
+                    "Chest X-Ray": "Upload your Chest X-Ray image.",
+                    "CT Scan": selectedCTType === "2D" ? "Upload your 2D Brain CT image (JPG, JPEG, or PNG)." : "Upload your 3D CT scan file.",
+                    "Breast Ultrasound": "Upload your Breast Ultrasound image.",
+                    "Abdominal Ultrasound": "Upload your Abdominal Ultrasound image.",
+                    "MRI": "Upload your MRI image or MRI scan files."
+                };
+                helpText.textContent = isUltrasound
+                    ? (uploadPrompts[studyType] || "Upload your Ultrasound image.")
+                    : (uploadPrompts[parentType] || `Upload your ${parentType} image.`);
+            }
+
             if (mriTypeGroup) mriTypeGroup.style.display = isMRI ? "block" : "none";
             if (mri2DBox) mri2DBox.style.display = isMRI && document.getElementById("mriStudyType").value === "2D" ? "block" : "none";
             if (mri3DBox) mri3DBox.style.display = isMRI && document.getElementById("mriStudyType").value === "3D" ? "block" : "none";
@@ -3402,9 +3722,8 @@ let currentCTSeriesId =
                 fileInput.multiple = false;
                 fileInput.removeAttribute("webkitdirectory");
                 fileInput.removeAttribute("directory");
-            } else if (studyType === "CT Scan") {
-                // CT uses a folder containing the full DICOM series.
-                // Chromium browsers (Chrome/Edge) support webkitdirectory.
+            } else if (isCTScan) {
+                // Preserve the existing 3D CT workflow: select a folder containing the DICOM series.
                 fileInput.accept = ".dcm,application/dicom";
                 fileInput.multiple = true;
                 fileInput.setAttribute("webkitdirectory", "");
@@ -3430,6 +3749,24 @@ let currentCTSeriesId =
                 validationMessage.style.display = "none";
                 validationMessage.textContent = "";
             }
+        }
+
+                function syncUltrasoundStudyType() {
+            // Keep the main Study Type set to "Ultrasound"; the subtype controls
+            // which existing ultrasound workflow is used during upload.
+            updateStudyTypeUI();
+        }
+
+        function getEffectiveMedicalStudyType() {
+            const parentType = document.getElementById("imageStudyType")?.value || "Chest X-Ray";
+            if (parentType === "CT Scan") {
+                const ctSubtype = document.getElementById("ctStudyType")?.value || "3D";
+                return ctSubtype === "2D" ? "2D Brain CT Hemorrhage" : "CT Scan";
+            }
+            if (parentType === "Ultrasound") {
+                return document.getElementById("ultrasoundStudyType")?.value || "Breast Ultrasound";
+            }
+            return parentType;
         }
 
         function setMedicalImageValidation(message, isError = true) {
@@ -3505,7 +3842,7 @@ let currentCTSeriesId =
 
         function validateMedicalImageSelection() {
             const fileInput = document.getElementById("medicalImage");
-            const studyType = document.getElementById("imageStudyType").value;
+            const studyType = getEffectiveMedicalStudyType();
             if (!fileInput) return false;
 
             const files = Array.from(fileInput.files || []);
@@ -3595,7 +3932,7 @@ let currentCTSeriesId =
 
             }
 
-            const selectedStudyType = studyTypeSelect.value || "Chest X-Ray";
+            const selectedStudyType = getEffectiveMedicalStudyType() || "Chest X-Ray";
 
             if (selectedStudyType === "MRI") {
                 const mriType = document.getElementById("mriStudyType").value;
@@ -3812,6 +4149,7 @@ let currentCTSeriesId =
                             <p><strong>Patient:</strong> ${escapeHtml(patientName)}</p>
                             <p><strong>Study date:</strong> ${escapeHtml(studyDate)}</p>
                             <p><strong>Model output:</strong> ${safeClass}</p>
+                            ${(() => { const triage = deriveResearchPriority(predictedClass, probabilities); return renderModalityTriage(triage.priority, triage.reason, "Abdominal Ultrasound Triage"); })()}
                             <h4 style="color:#0f172a;">Classification scores</h4>
                             <table style="width:100%;border-collapse:collapse;background:white;margin-bottom:18px;">
                                 <thead>
@@ -3998,6 +4336,7 @@ let currentCTSeriesId =
                             ${maskUrl ? `<img src="${maskUrl}" alt="Research segmentation mask" style="display:block;width:256px;max-width:100%;height:auto;border:1px solid #cbd5e1;border-radius:8px;background:white;margin:8px 0 10px;"><a href="${maskUrl}" download="breast_ultrasound_mask.png">Download segmentation mask</a>` : `<p>No segmentation mask was returned by the model.</p>`}
                             <h3 style="margin:18px 0 8px;color:#0f172a;">AI Output Summary</h3>
                             <p>The model returned <strong>${safeClass}</strong> as its predicted class. The class scores and segmentation mask shown above are model outputs only; they do not independently establish a clinical finding.</p>
+                            ${(() => { const triage = deriveResearchPriority(predictedClass, probabilities); return renderModalityTriage(triage.priority, triage.reason, "Breast Ultrasound Triage"); })()}
                             <p style="margin-top:16px;padding:12px;border-radius:8px;background:#fffbeb;border:1px solid #fde68a;color:#92400e;"><strong>Research prototype only.</strong> This output is not a diagnosis or validated clinical assessment. Qualified clinical review is required.</p>
                         </div>`;
                     validationResult.innerHTML = resultMarkup;
@@ -4652,6 +4991,67 @@ let currentCTSeriesId =
            MRI 2D SINGLE-IMAGE CLASSIFICATION
            Separate from the existing 3D MRI segmentation endpoint.
         ===================================================== */
+        // Shared operational-priority display for modalities whose existing result
+        // panels did not include the triage section. This is a research workflow label,
+        // not a clinically validated urgency score.
+        function renderModalityTriage(priority, reason, title = "AI Triage") {
+            const normalized = String(priority || "Moderate Priority");
+            const isHigh = /high/i.test(normalized);
+            const isLow = /low/i.test(normalized);
+            const color = isHigh ? "#b91c1c" : isLow ? "#166534" : "#92400e";
+            const background = isHigh ? "#fef2f2" : isLow ? "#f0fdf4" : "#fffbeb";
+            return `<section style="margin:18px 0;padding:16px;border:1px solid #cbd5e1;border-radius:10px;background:${background};color:#334155;line-height:1.6;">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+                    <h3 style="margin:0;color:#0f172a;">🚦 ${title}</h3>
+                    <strong style="color:${color};background:#fff;border:1px solid #cbd5e1;border-radius:999px;padding:7px 12px;">${normalized}</strong>
+                </div>
+                <p style="margin-top:10px;"><strong>Reason:</strong> ${String(reason || "Model output requires qualified review.").replace(/[&<>"']/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]))}</p>
+                <p style="margin-top:8px;color:#92400e;font-size:13px;">Operational workflow priority only—not a diagnosis or validated clinical urgency assessment. A qualified clinician must review the images and clinical information.</p>
+            </section>`;
+        }
+
+        // Dedicated priority mapping for the 2D brain MRI classifier only.
+        // Keep deriveResearchPriority() unchanged because other modalities use it.
+        function deriveMRI2DResearchPriority(predictedClass) {
+            const normalized = String(predictedClass || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+            if (["notumor", "normal", "healthy", "negative", "no tumor".replace(/[^a-z0-9]/g, "")].includes(normalized)) {
+                return {
+                    priority: "Low Priority",
+                    reason: `The 2D MRI model output was “${predictedClass}”. This is a research workflow label, not a diagnosis; the score is not calibrated and clinician review is still required.`
+                };
+            }
+            if (["glioma", "meningioma", "pituitary"].includes(normalized)) {
+                return {
+                    priority: "High Priority",
+                    reason: `The 2D MRI model output was “${predictedClass}”; prioritize prompt review by a qualified clinician. This is an operational research workflow label, not a diagnosis or validated clinical urgency assessment.`
+                };
+            }
+            return {
+                priority: "AI Inconclusive / Manual Review",
+                reason: `The 2D MRI model output “${predictedClass || "(missing class)"}” does not map to a supported workflow category; arrange qualified manual review.`
+            };
+        }
+
+        function deriveResearchPriority(predictedClass, probabilities = {}) {
+            const label = String(predictedClass || "").toLowerCase();
+            const scores = Object.entries(probabilities || {}).map(([key, value]) => [String(key).toLowerCase(), Number(value)]).filter(([, value]) => Number.isFinite(value));
+            const scoreFor = (...keys) => {
+                const entry = scores.find(([key]) => keys.some(k => key.includes(k)));
+                if (!entry) return null;
+                return entry[1] <= 1 ? entry[1] : entry[1] / 100;
+            };
+            if (/malignan|cancer|tumou?r|glioma|meningioma|pituitary|abnormal|hemorrhage|positive/.test(label)) {
+                return { priority: "High Priority", reason: `The model output was “${predictedClass}”; prioritize qualified review.` };
+            }
+            if (/normal|no.?tumou?r|negative|healthy/.test(label)) {
+                return { priority: "Low Priority", reason: `The model output was “${predictedClass}”. This does not rule out disease; qualified review is still required.` };
+            }
+            const abnormal = scoreFor("abnormal", "malignant", "tumor", "glioma", "meningioma", "pituitary");
+            if (abnormal !== null && abnormal >= 0.7) return { priority: "High Priority", reason: "The model's abnormal-class score is elevated; prioritize qualified review." };
+            if (abnormal !== null && abnormal <= 0.2 && scoreFor("normal") !== null && scoreFor("normal") >= 0.7) return { priority: "Low Priority", reason: "The model favored the normal class; this does not rule out disease and clinician review remains necessary." };
+            return { priority: "Moderate Priority", reason: "The model output is uncertain or does not map reliably to an urgency category; arrange qualified review." };
+        }
+
         async function runMRI2DClassification(fileOverride = null) {
             const fileInput = document.getElementById("mri2DImageFile");
             const status = document.getElementById("mri2DClassificationStatus");
@@ -4720,6 +5120,7 @@ let currentCTSeriesId =
                         Highest model score (not calibrated): ${(Number(result.score_not_calibrated) * 100).toFixed(2)}%<br>
                         Model: ${escapeHtml(result.model)}
                     </div>
+                    ${(() => { const triage = result.triage_priority ? { priority: result.triage_priority, reason: result.triage_reason } : deriveMRI2DResearchPriority(result.predicted_class); return renderModalityTriage(triage.priority, triage.reason, "2D Brain MRI Triage"); })()}
                     <h3 style="margin:0 0 10px;">Grad-CAM visualization</h3>
                     <p style="color:#64748b;line-height:1.6;margin-bottom:12px;">The overlay highlights image regions that influenced this model prediction. It is an experimental explanation, not a lesion outline or diagnosis.</p>
                     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-bottom:22px;">
@@ -4825,6 +5226,12 @@ let currentCTSeriesId =
                     probabilityRows += `<div class="result-row"><span class="result-label">${escapeHtml(name)}</span><span class="result-value">${(Number(value)*100).toFixed(2)}%</span></div>`;
                 });
 
+                const mri3dPrioritySource = Object.entries(probabilities).sort((a, b) => Number(b[1]) - Number(a[1]))[0];
+                const mri3dPriority = result.triage_priority
+                    ? { priority: result.triage_priority, reason: result.triage_reason || "Priority returned by the existing MRI research workflow." }
+                    : (mri3dPrioritySource
+                        ? deriveResearchPriority(mri3dPrioritySource[0], probabilities)
+                        : { priority: "AI Inconclusive / Manual Review", reason: "Segmentation output is available, but no auxiliary class scores were returned to support a more specific workflow label." });
                 resultBox.innerHTML = `
                     <div style="padding:16px;border:1px solid #bbf7d0;background:#f0fdf4;color:#166534;border-radius:10px;margin-bottom:18px;line-height:1.6;">
                         <strong>✓ MRI research inference completed</strong><br>
@@ -4832,6 +5239,7 @@ let currentCTSeriesId =
                         Segmentation shape: ${escapeHtml((result.segmentation_shape || []).join(" × "))}<br>
                         Preview slice index: ${escapeHtml(result.preview_slice_index)}
                     </div>
+                    ${renderModalityTriage(mri3dPriority.priority, mri3dPriority.reason, "3D Brain MRI Triage")}
                     <h3 style="margin:0 0 12px;">Segmentation Preview</h3>
                     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:18px;margin-bottom:22px;">
                         ${imageMarkup(result.flair_slice_png, "Center FLAIR slice", "FLAIR center slice")}
@@ -6264,6 +6672,186 @@ let currentCTSeriesId =
                 `;
 
                 // --------------------------------------------------
+                // YOLO DETECTION OUTPUT (X-RAY ONLY)
+                // --------------------------------------------------
+                // The backend already runs YOLO during the analysis request.
+                // Display its status and load the protected annotated image
+                // through apiFetch so the Bearer token is retained.
+                // Other modalities that return status "skipped" are unchanged.
+                // --------------------------------------------------
+                const yoloResult = result.yolo_detection;
+
+                if (yoloResult && yoloResult.status !== "skipped") {
+                    const yoloSection = document.createElement("section");
+                    yoloSection.id = "yoloDetectionSection";
+                    yoloSection.style.cssText =
+                        "margin-top:30px;padding-top:25px;border-top:2px solid #e2e8f0;";
+
+                    const yoloTitle = document.createElement("h3");
+                    yoloTitle.textContent = "🎯 YOLO Object Detection (X-ray)";
+                    yoloTitle.style.cssText =
+                        "margin-bottom:12px;color:#0f172a;";
+                    yoloSection.appendChild(yoloTitle);
+
+                    const yoloStatus = document.createElement("p");
+                    yoloStatus.id = "yoloDetectionStatus";
+                    yoloStatus.style.cssText =
+                        "margin:0 0 16px;padding:12px;border-radius:8px;line-height:1.6;" +
+                        "background:#f8fafc;border:1px solid #e2e8f0;color:#334155;";
+
+                    const yoloDetections = Array.isArray(yoloResult.detections)
+                        ? yoloResult.detections
+                        : [];
+
+                    if (yoloResult.status === "completed" && yoloDetections.length === 0) {
+                        yoloStatus.textContent =
+                            "YOLO completed, but no boxes met the configured confidence threshold (" +
+                            (yoloResult.confidence_threshold ?? "not supplied") +
+                            "). This does not establish that the image is normal.";
+                    } else if (yoloResult.status === "completed") {
+                        yoloStatus.textContent =
+                            "YOLO completed and returned " + yoloDetections.length +
+                            " detection(s). These are experimental model outputs, not diagnoses.";
+                    } else {
+                        yoloStatus.textContent =
+                            "YOLO status: " + String(yoloResult.status || "unknown") +
+                            ". " + String(yoloResult.note || "The detector did not provide a completed result.");
+                    }
+
+                    yoloSection.appendChild(yoloStatus);
+
+                    if (yoloDetections.length > 0) {
+                        const detectionHeading = document.createElement("h4");
+                        detectionHeading.textContent = "Detected objects";
+                        detectionHeading.style.cssText =
+                            "margin:12px 0;color:#334155;";
+                        yoloSection.appendChild(detectionHeading);
+
+                        const detectionList = document.createElement("div");
+                        detectionList.style.cssText =
+                            "border:1px solid #e2e8f0;border-radius:10px;padding:12px;margin-bottom:16px;";
+
+                        yoloDetections.forEach(function(detection, index) {
+                            const row = document.createElement("div");
+                            row.style.cssText =
+                                "padding:10px 0;border-bottom:" +
+                                (index < yoloDetections.length - 1 ? "1px solid #e2e8f0" : "none") + ";";
+
+                            const label = document.createElement("strong");
+                            label.textContent = String(
+                                detection.class_name || detection.name || detection.label || "Object"
+                            );
+                            row.appendChild(label);
+
+                            const confidenceValue = detection.confidence ?? detection.score;
+                            if (confidenceValue !== undefined && confidenceValue !== null) {
+                                const confidence = document.createElement("span");
+                                const numericConfidence = Number(confidenceValue);
+                                const formattedConfidence = Number.isFinite(numericConfidence)
+                                    ? ((numericConfidence <= 1 ? numericConfidence * 100 : numericConfidence).toFixed(1) + "%")
+                                    : String(confidenceValue);
+                                confidence.textContent = " — confidence " + formattedConfidence;
+                                confidence.style.color = "#475569";
+                                row.appendChild(confidence);
+                            }
+
+                            const box = detection.box || detection.bbox;
+                            if (box !== undefined && box !== null) {
+                                const boxText = document.createElement("div");
+                                boxText.style.cssText = "margin-top:4px;color:#64748b;font-size:13px;";
+                                boxText.textContent = "Bounding box: " +
+                                    (Array.isArray(box) ? box.join(", ") : JSON.stringify(box));
+                                row.appendChild(boxText);
+                            }
+
+                            detectionList.appendChild(row);
+                        });
+
+                        yoloSection.appendChild(detectionList);
+                    }
+
+                    const yoloImageContainer = document.createElement("div");
+                    yoloImageContainer.id = "yoloAnnotatedImageContainer";
+                    yoloImageContainer.style.cssText =
+                        "margin-top:14px;text-align:center;";
+                    yoloSection.appendChild(yoloImageContainer);
+
+                    const yoloFilename = String(yoloResult.annotated_image || "")
+                        .split(/[\\/]/)
+                        .pop();
+
+                    if (
+                        yoloResult.status === "completed" &&
+                        yoloFilename &&
+                        /^[A-Za-z0-9_.-]+$/.test(yoloFilename)
+                    ) {
+                        const imageLoading = document.createElement("p");
+                        imageLoading.textContent = "Loading protected YOLO annotated image…";
+                        imageLoading.style.cssText = "color:#64748b;margin:12px 0;";
+                        yoloImageContainer.appendChild(imageLoading);
+
+                        try {
+                            const yoloImageResponse = await apiFetch(
+                                "/xai_outputs/" + encodeURIComponent(yoloFilename)
+                            );
+
+                            if (!yoloImageResponse.ok) {
+                                let message = "Could not load the YOLO annotated image.";
+                                try {
+                                    const errorPayload = await yoloImageResponse.json();
+                                    message = errorPayload.detail || message;
+                                } catch (_) {}
+                                throw new Error(message);
+                            }
+
+                            const yoloBlob = await yoloImageResponse.blob();
+                            const yoloImageUrl = URL.createObjectURL(yoloBlob);
+                            yoloImageContainer.replaceChildren();
+
+                            const imageCaption = document.createElement("p");
+                            imageCaption.textContent = "YOLO annotated image";
+                            imageCaption.style.cssText =
+                                "color:#475569;margin-bottom:12px;font-weight:600;";
+                            yoloImageContainer.appendChild(imageCaption);
+
+                            const yoloImage = document.createElement("img");
+                            yoloImage.src = yoloImageUrl;
+                            yoloImage.alt = "YOLO annotated X-ray research output";
+                            yoloImage.style.cssText =
+                                "display:block;width:100%;max-width:800px;max-height:650px;" +
+                                "object-fit:contain;margin:0 auto;border-radius:10px;" +
+                                "border:1px solid #cbd5e1;background:#000;";
+                            yoloImageContainer.appendChild(yoloImage);
+                        } catch (yoloImageError) {
+                            yoloImageContainer.replaceChildren();
+                            const imageError = document.createElement("p");
+                            imageError.textContent =
+                                "YOLO output exists, but the protected image could not be loaded: " +
+                                (yoloImageError.message || "Unknown error");
+                            imageError.style.cssText =
+                                "color:#b91c1c;background:#fef2f2;border:1px solid #fecaca;" +
+                                "padding:12px;border-radius:8px;text-align:left;";
+                            yoloImageContainer.appendChild(imageError);
+                        }
+                    } else if (yoloResult.status === "completed") {
+                        const noImage = document.createElement("p");
+                        noImage.textContent =
+                            "YOLO completed, but the backend did not provide a usable annotated-image filename.";
+                        noImage.style.color = "#92400e";
+                        yoloImageContainer.appendChild(noImage);
+                    }
+
+                    const yoloNotice = document.createElement("p");
+                    yoloNotice.textContent =
+                        "Research-only detector output. Boxes and scores are not a diagnosis; no detection does not rule out disease.";
+                    yoloNotice.style.cssText =
+                        "margin-top:14px;color:#64748b;font-size:13px;line-height:1.6;";
+                    yoloSection.appendChild(yoloNotice);
+
+                    resultBox.appendChild(yoloSection);
+                }
+
+                // --------------------------------------------------
                 // AI TRIAGE
                 // --------------------------------------------------
                 // Retrieve the triage result that the backend calculated
@@ -6976,20 +7564,41 @@ let currentCTSeriesId =
 
                     }
 
-                    // The XAI backend returns its fields directly
-                    // (not inside an "explanation" object).
-                    if (
-                        !xaiResult.explanation_path
-                    ) {
+                    // A Normal prediction is valid, but the current XAI
+                    // checkpoint has no Normal class target. Show the model
+                    // result clearly instead of presenting it as a failed API.
+                    if (xaiResult.explanation_available === false) {
+                        const normalProbability = Number(xaiResult.probability);
+                        xaiSection.innerHTML = `
+                            <h3 style="margin-bottom:15px;color:#0f172a;">🔍 Explainable AI (XAI)</h3>
+                            <div style="background:#f8fafc;border:1px solid #cbd5e1;border-radius:12px;padding:20px;">
+                                <strong style="color:#334155;">Grad-CAM not applicable to this output</strong>
+                                <p style="margin-top:10px;color:#475569;line-height:1.6;">
+                                    ${xaiResult.note || "The model predicted Normal, and the current XAI checkpoint supports only abnormality-class targets."}
+                                </p>
+                                <div class="result-row">
+                                    <span class="result-label">Predicted class</span>
+                                    <span class="result-value">${xaiResult.finding || "Normal"}</span>
+                                </div>
+                                ${Number.isFinite(normalProbability) ? `
+                                    <div class="result-row">
+                                        <span class="result-label">Stored model score</span>
+                                        <span class="result-value">${(normalProbability * 100).toFixed(2)}%</span>
+                                    </div>
+                                ` : ""}
+                                <p style="margin-top:14px;color:#64748b;font-size:13px;line-height:1.5;">
+                                    This research output is not a diagnosis. A qualified clinician must review the image and clinical information.
+                                </p>
+                            </div>
+                        `;
+                    } else {
+                        // The XAI backend returns its fields directly
+                        // (not inside an "explanation" object).
+                        if (!xaiResult.explanation_path) {
+                            throw new Error("The backend did not return a Grad-CAM image.");
+                        }
 
-                        throw new Error(
-                            "The backend did not return a Grad-CAM image."
-                        );
-
-                    }
-
-                    const explanation =
-                        xaiResult;
+                        const explanation = xaiResult;
 
                     const imagePath =
                         explanation.explanation_path;
@@ -7182,6 +7791,7 @@ let currentCTSeriesId =
                         </div>
 
                     `;
+                    }
 
                 }
 
@@ -7469,6 +8079,15 @@ let currentCTSeriesId =
 
         function buildUltrasoundReport(data) {
             const line = "============================================================";
+            // Reuse the existing breast-ultrasound priority rules without changing inference.
+            // Score values are stored as display strings (for example, "49.12%"); convert
+            // them to numbers only for the existing research-priority helper.
+            const scoreValues = {};
+            Object.entries(data.scores || {}).forEach(([key, value]) => {
+                const numeric = Number(String(value ?? "").replace(/%/g, "").trim());
+                if (Number.isFinite(numeric)) scoreValues[key] = numeric;
+            });
+            const triage = deriveResearchPriority(data.predictedClass, scoreValues);
             return [
                 "BREAST ULTRASOUND AI REPORT — RESEARCH DRAFT",
                 line,
@@ -7487,13 +8106,18 @@ let currentCTSeriesId =
                 "Malignant: " + (data.scores?.malignant || "Not provided"),
                 "Normal: " + (data.scores?.normal || "Not provided"),
                 "",
-                "3. SEGMENTATION",
+                "3. AI TRIAGE PRIORITY",
+                "Priority: " + triage.priority,
+                "Reason: " + triage.reason,
+                "This is an operational research workflow label, not a diagnosis or validated clinical urgency assessment.",
+                "",
+                "4. SEGMENTATION",
                 data.maskUrl ? "A segmentation mask was returned by the model and is available in the AI Analysis section." : "No segmentation mask was returned by the model.",
                 "",
-                "4. INTERPRETATION LIMITATION",
+                "5. INTERPRETATION LIMITATION",
                 "Automated research output only. No independent clinical finding, lesion measurement, BI-RADS category, or treatment recommendation is inferred by this report.",
                 "",
-                "5. REVIEW STATUS",
+                "6. REVIEW STATUS",
                 "Draft — qualified clinician/radiologist review required before any clinical use.",
                 line
             ].join("\n");
@@ -7503,6 +8127,28 @@ let currentCTSeriesId =
             const reportsNav = document.querySelector('button.nav-item[onclick*="reportsPage"]');
             showPage("reportsPage", reportsNav);
             generateStudyReport();
+        }
+
+        function filterPreviousReports() {
+            const search = (document.getElementById("previousReportSearch")?.value || "").trim().toLowerCase();
+            const status = (document.getElementById("previousReportStatusFilter")?.value || "").trim().toLowerCase();
+            const container = document.getElementById("previousReports");
+            const message = document.getElementById("previousReportFilterMessage");
+            if (!container) return;
+            const cards = Array.from(container.querySelectorAll("[data-previous-report-card]"));
+            let visible = 0;
+            cards.forEach(function(card) {
+                const matchesSearch = !search || (card.dataset.searchText || "").includes(search);
+                const cardStatus = (card.dataset.reportStatus || "").toLowerCase();
+                const matchesStatus = !status || cardStatus.includes(status);
+                const show = matchesSearch && matchesStatus;
+                card.style.display = show ? "block" : "none";
+                if (show) visible++;
+            });
+            if (message) {
+                message.style.display = cards.length ? "block" : "none";
+                message.textContent = cards.length ? ("Showing " + visible + " of " + cards.length + " report(s).") : "";
+            }
         }
 
         async function loadReportsPage() {
@@ -7580,12 +8226,16 @@ let currentCTSeriesId =
 
             const storedUltrasound = (() => { try { return JSON.parse(localStorage.getItem("latestBreastUltrasoundResult") || "null"); } catch (_) { return null; } })();
             const isCurrentUltrasoundStudy = Boolean(storedUltrasound && String(storedUltrasound.studyId) === String(currentStudyId));
+            const storedBrainCt = (() => { try { return JSON.parse(localStorage.getItem("latestBrainCtHemorrhageResult") || "null"); } catch (_) { return null; } })();
+            const isCurrentBrainCtStudy = Boolean(storedBrainCt && String(storedBrainCt.studyId) === String(currentStudyId));
             if (reportButton) {
-                reportButton.textContent = isCurrentCTStudy
-                    ? "📄 Generate CT Draft Report"
-                    : isCurrentUltrasoundStudy
-                        ? "📄 Generate Ultrasound Draft Report"
-                        : "📄 Generate Final Report";
+                reportButton.textContent = isCurrentBrainCtStudy
+                    ? "📄 Generate 2D Brain CT Draft Report"
+                    : isCurrentCTStudy
+                        ? "📄 Generate CT Draft Report"
+                        : isCurrentUltrasoundStudy
+                            ? "📄 Generate Ultrasound Draft Report"
+                            : "📄 Generate Final Report";
             }
             if (isCurrentUltrasoundStudy) {
                 const previousReports = document.getElementById("previousReports");
@@ -7642,6 +8292,9 @@ let currentCTSeriesId =
                                 function(report) {
                                     return `
                                         <div
+                                            data-previous-report-card="true"
+                                            data-report-status="${escapeReportText(report.report_status || "Unknown").toLowerCase()}"
+                                            data-search-text="${escapeReportText([report.id, report.report_status, report.generated_by, report.created_at].filter(Boolean).join(" ")).toLowerCase()}"
                                             style="
                                                 margin-bottom:12px;
                                                 padding:15px;
@@ -7732,6 +8385,7 @@ let currentCTSeriesId =
                                 }
                             )
                             .join("");
+                    filterPreviousReports();
                 }
 
             } catch (error) {
@@ -7795,6 +8449,89 @@ let currentCTSeriesId =
                 String(currentStudyId)
             );
 
+            // 2D Brain CT report path: only use a result explicitly linked
+            // to the currently selected Brain CT study.
+            const brainCtRaw = localStorage.getItem("latestBrainCtHemorrhageResult");
+            let brainCtData = null;
+            try { brainCtData = brainCtRaw ? JSON.parse(brainCtRaw) : null; } catch (_) {}
+            if (brainCtData && String(brainCtData.studyId) === String(currentStudyId)) {
+                const prediction = brainCtData.prediction || {};
+                const probabilities = brainCtData.probabilities || {};
+                const triage = brainCtData.triage || {};
+                const line = "============================================================";
+                const reportText = [
+                    "2D BRAIN CT HEMORRHAGE — AI RESEARCH REPORT (DRAFT)",
+                    line,
+                    "",
+                    "Report purpose: Research-only, single-slice classification summary",
+                    "Study ID: " + currentStudyId,
+                    "Patient ID: " + (brainCtData.patientCode || "Not available"),
+                    "Patient name: " + (brainCtData.patientName || "Not available"),
+                    "Study date: " + (brainCtData.studyDate || "Not available"),
+                    "Input filename: " + (brainCtData.filename || "Not available"),
+                    "Model: " + ((brainCtData.model && brainCtData.model.name) || "BrainCTCNN"),
+                    "Architecture: " + ((brainCtData.model && brainCtData.model.architecture) || "2D grayscale CNN"),
+                    "Input dimensions: " + (((brainCtData.input && brainCtData.input.size) || []).join(" × ") || "224 × 224"),
+                    "",
+                    "1. MODEL OUTPUT",
+                    "Predicted class: " + (prediction.class || "Not available"),
+                    "Model confidence: " + (formatBrainCtProbability(prediction.confidence) || "Not available"),
+                    "",
+                    "2. CLASS PROBABILITIES",
+                    "No hemorrhage: " + (formatBrainCtProbability(probabilities["No hemorrhage"] ?? prediction.probability_no_hemorrhage) || "Not available"),
+                    "Hemorrhage: " + (formatBrainCtProbability(probabilities["Hemorrhage"] ?? prediction.probability_hemorrhage) || "Not available"),
+                    "",
+                    "3. EXPLAINABILITY",
+                    "Method: " + ((brainCtData.explanation && brainCtData.explanation.method) || "Grad-CAM"),
+                    "Candidate region (224 × 224 coordinates): " + (((brainCtData.explanation && brainCtData.explanation.candidate_region_box_xyxy) || []).join(", ") || "Not available"),
+                    "Explanation note: " + ((brainCtData.explanation && brainCtData.explanation.note) || "Heatmap and candidate box are experimental model explanations, not validated hemorrhage localization."),
+                    "Grad-CAM overlays are displayed in the AI Analysis section and are not embedded in this text report.",
+                    "",
+                    "4. WORKFLOW TRIAGE",
+                    "Priority: " + (triage.priority || "Manual Review"),
+                    "Reason: " + (triage.reason || "Qualified review required."),
+                    "Flagged by workflow threshold: " + (triage.flagged === true ? "Yes" : triage.flagged === false ? "No" : "Not available"),
+                    "",
+                    "5. IMPORTANT LIMITATIONS",
+                    brainCtData.clinical_note || "Research-only output for a single 2D slice. This is not a diagnosis and does not assess an entire CT study.",
+                    "This report must not be used alone to make treatment decisions or rule out hemorrhage. Qualified clinical review is required.",
+                    "",
+                    "Report status: Draft — saved to the platform report database.",
+                    "Generated: " + (brainCtData.generatedAt || new Date().toLocaleString()),
+                    line
+                ].join("\n");
+
+                const outputEl = document.getElementById("generatedReport");
+                if (outputEl) outputEl.textContent = reportText;
+
+                try {
+                    showReportMessage("Saving 2D Brain CT research draft...");
+                    const saveResponse = await apiFetch(
+                        "/api/brain-ct/hemorrhage/report/" + encodeURIComponent(currentStudyId),
+                        {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ report_text: reportText })
+                        }
+                    );
+                    const saveResult = await saveResponse.json();
+                    if (!saveResponse.ok) {
+                        throw new Error(saveResult.detail || "Could not save the Brain CT draft report.");
+                    }
+                    brainCtData.reportId = saveResult.report_id;
+                    brainCtData.reportSaved = true;
+                    localStorage.setItem("latestBrainCtHemorrhageResult", JSON.stringify(brainCtData));
+                    showReportMessage("2D Brain CT draft report saved successfully (Report ID " + saveResult.report_id + ").");
+                    await loadReportsPage();
+                    await loadReportHistory();
+                } catch (saveError) {
+                    showReportMessage("Brain CT report preview generated, but it could not be saved: " + saveError.message, true);
+                    console.error("Brain CT report save failed:", saveError);
+                }
+                if (outputEl) outputEl.scrollIntoView({ behavior: "smooth", block: "start" });
+                return;
+            }
+
             const abdominalRaw = localStorage.getItem("latestAbdominalUltrasoundResult");
             let abdominalData = null;
             try { abdominalData = abdominalRaw ? JSON.parse(abdominalRaw) : null; } catch (_) {}
@@ -7804,6 +8541,9 @@ let currentCTSeriesId =
                     const n = Number(probs[key]);
                     return Number.isFinite(n) ? ((n <= 1 ? n * 100 : n).toFixed(2) + "%") : "Not provided";
                 };
+                // Build the abdominal report from the existing model output and existing priority helper.
+                // This changes report presentation only; model inference and thresholds remain untouched.
+                const abdominalTriage = deriveResearchPriority(abdominalData.predictedClass, probs);
                 const abdominalReportText = [
                     "ABDOMINAL ULTRASOUND — AI RESEARCH REPORT",
                     "==========================================",
@@ -7819,6 +8559,11 @@ let currentCTSeriesId =
                     "Abnormal score: " + formatScore("abnormal"),
                     "Normal score: " + formatScore("normal"),
                     "Model: " + (abdominalData.modelName || "Abdominal Ultrasound Binary Classifier"),
+                    "",
+                    "AI TRIAGE PRIORITY",
+                    "Priority: " + abdominalTriage.priority,
+                    "Reason: " + abdominalTriage.reason,
+                    "Workflow note: Operational research priority only; not a diagnosis or validated clinical urgency assessment. Qualified clinician review is required.",
                     "",
                     "IMPORTANT LIMITATION",
                     "Research prototype only. This model output is not a diagnosis or validated clinical assessment. It may be incorrect and must not be used alone to make medical decisions. Qualified clinical review is required.",
@@ -8014,6 +8759,47 @@ let currentCTSeriesId =
                         study.detail ||
                         "Could not load study information."
                     );
+                }
+
+                // MRI classification/segmentation uses its own inference
+                // endpoints and saves its report directly. It does not
+                // create the generic predictions consumed by
+                // /api/analysis/{study_id}; use the already-saved MRI report
+                // instead of incorrectly showing "No AI analysis results".
+                const studyTypeForReport = String(
+                    study.study_type || study.modality || ""
+                ).toLowerCase();
+                if (studyTypeForReport.includes("mri")) {
+                    const savedMriReportsResponse = await apiFetch(
+                        "/api/reports/" + encodeURIComponent(currentStudyId)
+                    );
+                    const savedMriReportsResult = await savedMriReportsResponse.json();
+                    if (!savedMriReportsResponse.ok) {
+                        throw new Error(
+                            savedMriReportsResult.detail ||
+                            "Could not load the saved MRI report."
+                        );
+                    }
+
+                    const savedMriReports = Array.isArray(savedMriReportsResult.reports)
+                        ? savedMriReportsResult.reports
+                        : [];
+                    if (!savedMriReports.length || !savedMriReports[0].report_text) {
+                        throw new Error(
+                            "No saved MRI report was found for this study. Run the MRI analysis first, then generate the report."
+                        );
+                    }
+
+                    if (output) {
+                        output.textContent = savedMriReports[0].report_text;
+                    }
+                    showReportMessage(
+                        "Saved MRI report loaded successfully (Report ID " +
+                        (savedMriReports[0].id || "available") + ")."
+                    );
+                    await loadReportsPage();
+                    if (output) output.scrollIntoView({ behavior: "smooth", block: "start" });
+                    return;
                 }
 
                 /*
@@ -8458,12 +9244,219 @@ let currentCTSeriesId =
                             String(latestCTScan.study_id) ===
                                 String(currentStudyId)
                         );
+                    let latestBrainCt = null;
+                    try { latestBrainCt = JSON.parse(localStorage.getItem("latestBrainCtHemorrhageResult") || "null"); } catch (_) {}
+                    const stillBrainCTStudy = Boolean(latestBrainCt && String(latestBrainCt.studyId) === String(currentStudyId));
 
                     button.textContent =
-                        stillCTStudy
-                            ? "📄 Generate CT Draft Report"
-                            : "📄 Generate Final Report";
+                        stillBrainCTStudy
+                            ? "📄 Generate 2D Brain CT Draft Report"
+                            : stillCTStudy
+                                ? "📄 Generate CT Draft Report"
+                                : "📄 Generate Final Report";
                 }
+            }
+        }
+
+        /* =====================================================
+           DASHBOARD: READ-ONLY TRIAGE OVERVIEW
+           Uses existing saved report history. Does not run models,
+           recalculate model predictions, or modify reports/database.
+        ===================================================== */
+        function getDashboardSavedPriority(report) {
+            const text = String((report && report.report_text) || "");
+            const lines = text.split(/\r?\n/);
+            for (const line of lines) {
+                if (!/\bpriority\s*[:=\-]/i.test(line)) continue;
+                const match = line.match(/(?:triage\s*(?:workflow\s*)?|workflow\s*)?priority\s*[:=\-]\s*(high|moderate|medium|low)(?:\s+priority)?\b/i);
+                if (match) {
+                    const value = match[1].toLowerCase();
+                    return value === "medium" ? "moderate" : value;
+                }
+            }
+            // Accept explicit triage labels in known report wording, but do not infer urgency from diagnosis/class names.
+            if (/\b(?:triage\s+priority|workflow\s+priority)\s*(?:is\s*)?high\s+priority\b/i.test(text)) return "high";
+            if (/\b(?:triage\s+priority|workflow\s+priority)\s*(?:is\s*)?moderate\s+priority\b/i.test(text)) return "moderate";
+            if (/\b(?:triage\s+priority|workflow\s+priority)\s*(?:is\s*)?low\s+priority\b/i.test(text)) return "low";
+            return "unknown";
+        }
+
+        function getDashboardSavedModelOutput(report) {
+            const text = String((report && report.report_text) || "");
+            const patterns = [
+                /(?:predicted\s+class|highest-scoring\s+predicted\s+class|model\s+output)\s*[:=]\s*([^\r\n]+)/i,
+                /(?:final\s+predicted\s+class\s+summary)\s*[:=]\s*([^\r\n]+)/i
+            ];
+            for (const pattern of patterns) {
+                const match = text.match(pattern);
+                if (match && match[1]) return match[1].trim().slice(0, 70);
+            }
+            return "Saved report";
+        }
+
+        function dashboardSafeCell(value) {
+            return value === null || value === undefined || String(value).trim() === "" ? "—" : String(value);
+        }
+
+        async function loadDashboardTriageOverview() {
+            const totalEl = document.getElementById("dashboardTotalCases");
+            const recentMessage = document.getElementById("dashboardRecentCasesMessage");
+            const recentWrap = document.getElementById("dashboardRecentCasesWrap");
+            const recentBody = document.getElementById("dashboardRecentCasesBody");
+            if (!totalEl || !recentMessage || !recentWrap || !recentBody) return;
+            const metricIds = {
+                total: "dashboardTotalCases", high: "dashboardHighCases", moderate: "dashboardModerateCases", low: "dashboardLowCases",
+                donutTotal: "dashboardDonutTotal", highLegend: "dashboardHighLegend", moderateLegend: "dashboardModerateLegend",
+                lowLegend: "dashboardLowLegend", unknownLegend: "dashboardUnknownLegend"
+            };
+            Object.values(metricIds).forEach(id => { const el = document.getElementById(id); if (el) el.textContent = "…"; });
+            recentMessage.style.display = "block";
+            recentMessage.textContent = "Loading recent cases from saved reports…";
+            recentWrap.style.display = "none";
+            recentBody.replaceChildren();
+            if (!canViewReportHistory()) {
+                recentMessage.textContent = "Report-history access is not available for this account.";
+                Object.values(metricIds).forEach(id => { const el = document.getElementById(id); if (el) el.textContent = "—"; });
+                return;
+            }
+            try {
+                const response = await apiFetch("/api/report-history");
+                const result = await response.json();
+                if (!response.ok) throw new Error(typeof result.detail === "string" ? result.detail : "Could not load report history.");
+                const reports = Array.isArray(result.reports) ? result.reports : [];
+                const classified = reports.map(report => ({ report, priority: getDashboardSavedPriority(report) }));
+                const counts = {
+                    high: classified.filter(item => item.priority === "high").length,
+                    moderate: classified.filter(item => item.priority === "moderate").length,
+                    low: classified.filter(item => item.priority === "low").length,
+                    unknown: classified.filter(item => item.priority === "unknown").length
+                };
+                const put = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = String(value); };
+                put("dashboardTotalCases", reports.length);
+                put("dashboardHighCases", counts.high); put("dashboardModerateCases", counts.moderate); put("dashboardLowCases", counts.low);
+                put("dashboardDonutTotal", reports.length); put("dashboardHighLegend", counts.high); put("dashboardModerateLegend", counts.moderate);
+                put("dashboardLowLegend", counts.low); put("dashboardUnknownLegend", counts.unknown);
+                const donut = document.getElementById("dashboardPriorityDonut");
+                if (donut) {
+                    const denominator = reports.length || 1;
+                    const highEnd = counts.high / denominator * 100;
+                    const moderateEnd = highEnd + counts.moderate / denominator * 100;
+                    const lowEnd = moderateEnd + counts.low / denominator * 100;
+                    donut.style.background = reports.length
+                        ? `conic-gradient(#dc2626 0% ${highEnd}%, #d97706 ${highEnd}% ${moderateEnd}%, #10b981 ${moderateEnd}% ${lowEnd}%, #cbd5e1 ${lowEnd}% 100%)`
+                        : "conic-gradient(#e2e8f0 0% 100%)";
+                    donut.setAttribute("aria-label", `Priority distribution: ${counts.high} high, ${counts.moderate} moderate, ${counts.low} low, ${counts.unknown} unclassified across ${reports.length} saved reports.`);
+                }
+                if (!reports.length) {
+                    recentMessage.textContent = "No saved reports are available yet. Once reports are saved, recent cases and priority distribution will appear here.";
+                    return;
+                }
+                const recent = classified.slice(0, 5);
+                recent.forEach(({report, priority}) => {
+                    const row = document.createElement("tr");
+                    const patientCell = document.createElement("td");
+                    patientCell.textContent = dashboardSafeCell(report.patient_code || report.patient_id);
+                    row.appendChild(patientCell);
+                    const studyCell = document.createElement("td");
+                    studyCell.textContent = dashboardSafeCell(report.study_type);
+                    row.appendChild(studyCell);
+                    const priorityCell = document.createElement("td");
+                    const pill = document.createElement("span");
+                    pill.className = `dashboard-priority-pill ${priority}`;
+                    pill.textContent = priority === "unknown" ? "Unclassified" : priority.charAt(0).toUpperCase() + priority.slice(1);
+                    priorityCell.appendChild(pill); row.appendChild(priorityCell);
+                    const outputCell = document.createElement("td");
+                    outputCell.textContent = getDashboardSavedModelOutput(report);
+                    row.appendChild(outputCell);
+                    const statusCell = document.createElement("td");
+                    statusCell.textContent = dashboardSafeCell(report.report_status || report.status);
+                    row.appendChild(statusCell);
+                    recentBody.appendChild(row);
+                });
+                recentMessage.style.display = "none";
+                recentWrap.style.display = "block";
+            } catch (error) {
+                recentMessage.textContent = "Could not load dashboard report summaries: " + (error.message || "Unknown error");
+                Object.values(metricIds).forEach(id => { const el = document.getElementById(id); if (el) el.textContent = "—"; });
+                const donut = document.getElementById("dashboardPriorityDonut");
+                if (donut) donut.style.background = "conic-gradient(#e2e8f0 0% 100%)";
+            }
+        }
+
+        /* =====================================================
+           DASHBOARD: HIGH-PRIORITY SAVED REPORTS
+           Reads report history only; does not alter model predictions,
+           triage rules, reports, or database records.
+        ===================================================== */
+        async function loadDashboardHighPriorityReports() {
+            const section = document.getElementById("dashboardHighPrioritySection");
+            const message = document.getElementById("highPriorityReportsMessage");
+            const tableWrap = document.getElementById("highPriorityTableWrap");
+            const tableBody = document.getElementById("highPriorityReportsBody");
+            const count = document.getElementById("highPriorityCount");
+            if (!section || !message || !tableBody || !count) return;
+
+            // Keep the dashboard section consistent with the existing report-history permissions.
+            section.style.display = canViewReportHistory() ? "block" : "none";
+            if (!canViewReportHistory()) return;
+
+            message.style.display = "block";
+            message.textContent = "Loading high-priority reports from report history…";
+            tableWrap.style.display = "none";
+            tableBody.replaceChildren();
+            count.textContent = "…";
+
+            try {
+                const response = await apiFetch("/api/report-history");
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(typeof result.detail === "string" ? result.detail : "Could not load report history.");
+                }
+                const reports = Array.isArray(result.reports) ? result.reports : [];
+                const highPriorityReports = reports.filter(function(report) {
+                    const text = String(report.report_text || "");
+                    // Match the explicit priority field in the saved report, not unrelated prose.
+                    return /(?:triage\s*(?:workflow\s*)?priority|workflow\s*priority|priority)\s*[:=\-]\s*high\s+priority/i.test(text)
+                        || /\btriage\b[^\n]{0,100}\bhigh\s+priority\b/i.test(text);
+                });
+
+                count.textContent = String(highPriorityReports.length);
+                if (!highPriorityReports.length) {
+                    message.textContent = reports.length
+                        ? "No saved reports explicitly marked High Priority were found. The queue updates when a report containing a high-priority triage result is saved."
+                        : "No saved reports are available in report history yet.";
+                    return;
+                }
+
+                highPriorityReports.forEach(function(report) {
+                    const row = document.createElement("tr");
+                    const values = [
+                        report.patient_code,
+                        report.patient_name,
+                        report.study_id,
+                        report.study_type,
+                        report.study_date,
+                        report.report_status
+                    ];
+                    values.forEach(function(value) {
+                        const cell = document.createElement("td");
+                        cell.textContent = value === null || value === undefined || value === "" ? "—" : String(value);
+                        row.appendChild(cell);
+                    });
+                    const priorityCell = document.createElement("td");
+                    const badge = document.createElement("span");
+                    badge.className = "high-priority-badge";
+                    badge.textContent = "High Priority";
+                    priorityCell.appendChild(badge);
+                    row.appendChild(priorityCell);
+                    tableBody.appendChild(row);
+                });
+                message.textContent = "Showing " + highPriorityReports.length + " high-priority report(s) from saved report history. Latest reports appear first.";
+                message.style.display = "block";
+                tableWrap.style.display = "block";
+            } catch (error) {
+                count.textContent = "—";
+                message.textContent = "Could not load the high-priority queue: " + (error.message || "Unknown error");
             }
         }
 
@@ -8513,6 +9506,9 @@ let currentCTSeriesId =
 
                 reports.forEach(function(report, index) {
                     const row = document.createElement("tr");
+                    row.dataset.reportSearch = [report.report_id, report.patient_code, report.patient_name, report.study_id, report.study_type, report.study_date, report.report_status, report.created_at, report.generated_by].filter(function(value) { return value !== null && value !== undefined; }).join(" ").toLowerCase();
+                    row.dataset.studyType = String(report.study_type || "").toLowerCase();
+                    row.dataset.reportStatus = String(report.report_status || "").toLowerCase();
                     const values = [
                         report.report_id,
                         report.patient_code,
@@ -8521,7 +9517,7 @@ let currentCTSeriesId =
                         report.study_type,
                         report.study_date,
                         report.report_status,
-                        report.created_at
+                        formatTimestampIST(report.created_at)
                     ];
 
                     values.forEach(function(value) {
@@ -8551,6 +9547,82 @@ let currentCTSeriesId =
                         }
                     });
                     actionCell.appendChild(viewButton);
+                    const downloadButton = document.createElement("button");
+                    downloadButton.type = "button";
+                    downloadButton.className = "btn btn-secondary btn-small";
+                    downloadButton.textContent = "Download PDF";
+                    downloadButton.style.marginTop = "5px";
+                    downloadButton.addEventListener("click", async function() {
+                        const originalText = downloadButton.textContent;
+                        downloadButton.disabled = true;
+                        downloadButton.textContent = "Preparing...";
+                        try {
+                            const pdfResponse = await apiFetch("/api/reports/" + encodeURIComponent(report.report_id) + "/pdf");
+                            if (!pdfResponse.ok) {
+                                let errorText = "Could not download this report PDF.";
+                                try { const errorData = await pdfResponse.json(); errorText = errorData.detail || errorText; } catch (_) {}
+                                throw new Error(errorText);
+                            }
+                            const blob = await pdfResponse.blob();
+                            if (!blob.size || (blob.type && !blob.type.toLowerCase().includes("pdf"))) {
+                                throw new Error("The server did not return a valid PDF file.");
+                            }
+                            const objectUrl = URL.createObjectURL(blob);
+                            const link = document.createElement("a");
+                            link.href = objectUrl;
+                            link.download = "medical_report_" + report.report_id + ".pdf";
+                            document.body.appendChild(link);
+                            link.click();
+                            link.remove();
+                            setTimeout(function() { URL.revokeObjectURL(objectUrl); }, 1000);
+                        } catch (error) {
+                            alert(error.message || "Could not download report PDF.");
+                        } finally {
+                            downloadButton.disabled = false;
+                            downloadButton.textContent = originalText;
+                        }
+                    });
+                    actionCell.appendChild(downloadButton);
+
+                    // Administrator-only report deletion; server-side authorization is also enforced.
+                    if (isAdminRole()) {
+                        const deleteButton = document.createElement("button");
+                        deleteButton.type = "button";
+                        deleteButton.className = "btn btn-secondary btn-small";
+                        deleteButton.textContent = "Delete";
+                        deleteButton.style.marginTop = "5px";
+                        deleteButton.style.color = "#b91c1c";
+                        deleteButton.style.borderColor = "#fecaca";
+                        deleteButton.addEventListener("click", async function() {
+                            const reportId = report.report_id;
+                            if (!window.confirm("Delete saved report #" + reportId + "? This permanently removes only this report record. The study, uploaded images, model files, and other reports will not be deleted.")) return;
+
+                            const originalText = deleteButton.textContent;
+                            deleteButton.disabled = true;
+                            deleteButton.textContent = "Deleting...";
+                            try {
+                                const deleteResponse = await apiFetch("/api/reports/" + encodeURIComponent(reportId), { method: "DELETE" });
+                                let deleteResult = {};
+                                try { deleteResult = await deleteResponse.json(); } catch (_) {}
+                                if (!deleteResponse.ok) {
+                                    throw new Error(typeof deleteResult.detail === "string" ? deleteResult.detail : "Could not delete this report.");
+                                }
+                                if (selectedMeta && selectedMeta.textContent.includes("Report #" + String(reportId))) {
+                                    selectedMeta.textContent = "The selected report was deleted.";
+                                    if (selectedText) selectedText.textContent = "No report selected.";
+                                }
+                                await loadReportHistory();
+                                if (typeof loadDashboardTriageOverview === "function") await loadDashboardTriageOverview();
+                                if (typeof loadDashboardHighPriorityReports === "function") await loadDashboardHighPriorityReports();
+                                message.textContent = "Report #" + reportId + " deleted successfully.";
+                            } catch (error) {
+                                alert(error.message || "Could not delete this report.");
+                                deleteButton.disabled = false;
+                                deleteButton.textContent = originalText;
+                            }
+                        });
+                        actionCell.appendChild(deleteButton);
+                    }
                     row.appendChild(actionCell);
                     tableBody.appendChild(row);
 
@@ -8566,6 +9638,7 @@ let currentCTSeriesId =
                     }
                 });
 
+                filterReportHistory();
                 message.textContent =
                     "Loaded " + reports.length + " saved report(s)." +
                     (result.scope === "own_patient_record"
@@ -8577,6 +9650,31 @@ let currentCTSeriesId =
                 const errorCell = tableBody.querySelector("td");
                 if (errorCell) errorCell.textContent = error.message;
                 message.textContent = "Failed to load report history.";
+            }
+        }
+
+        function filterReportHistory() {
+            const search = (document.getElementById("reportHistorySearch")?.value || "").trim().toLowerCase();
+            const studyType = (document.getElementById("reportHistoryStudyTypeFilter")?.value || "").trim().toLowerCase();
+            const status = (document.getElementById("reportHistoryStatusFilter")?.value || "").trim().toLowerCase();
+            const tableBody = document.getElementById("reportHistoryTableBody");
+            if (!tableBody) return;
+            const rows = Array.from(tableBody.querySelectorAll("tr")).filter(function(row) { return row.dataset.reportSearch !== undefined; });
+            let visible = 0;
+            rows.forEach(function(row) {
+                const matchesSearch = !search || row.dataset.reportSearch.includes(search);
+                const rowType = row.dataset.studyType || "";
+                const matchesType = !studyType || rowType.includes(studyType);
+                const rowStatus = row.dataset.reportStatus || "";
+                const matchesStatus = !status || rowStatus.includes(status);
+                const show = matchesSearch && matchesType && matchesStatus;
+                row.style.display = show ? "" : "none";
+                if (show) visible++;
+            });
+            const message = document.getElementById("reportHistoryMessage");
+            if (rows.length && message) {
+                const extra = message.textContent.includes("Showing") ? "" : "";
+                message.textContent = "Loaded " + rows.length + " saved report(s); showing " + visible + " after filters." + (extra ? "" : "");
             }
         }
 
@@ -8749,15 +9847,51 @@ let currentCTSeriesId =
                     throw new Error(message);
                 }
 
+                // Show the password only to the administrator who just created this account.
+                // It is never returned by the backend later or stored in browser storage.
                 showAdminUserMessage(
-                    "User created successfully: " +
-                    result.user.full_name +
-                    " (" +
-                    result.user.role +
-                    ")"
+                    "User created successfully: " + result.user.full_name +
+                    " (" + result.user.role + "). Temporary password shown below once."
                 );
-
-                clearAdminUserForm();
+                const messageBox = document.getElementById("adminUserMessage");
+                if (messageBox) {
+                    const credentialPanel = document.createElement("div");
+                    credentialPanel.style.cssText = "margin-top:10px;padding:12px;background:#fff;border:1px solid #bbf7d0;border-radius:8px;color:#166534;";
+                    const passwordLabel = document.createElement("div");
+                    passwordLabel.textContent = "New account password (share securely):";
+                    passwordLabel.style.fontWeight = "700";
+                    const passwordValue = document.createElement("code");
+                    passwordValue.textContent = password;
+                    passwordValue.style.cssText = "display:inline-block;margin:8px 8px 8px 0;padding:6px 9px;background:#f1f5f9;border-radius:5px;user-select:all;";
+                    const copyButton = document.createElement("button");
+                    copyButton.type = "button";
+                    copyButton.className = "btn btn-secondary btn-small";
+                    copyButton.textContent = "Copy password";
+                    copyButton.addEventListener("click", async function() {
+                        try {
+                            await navigator.clipboard.writeText(password);
+                            copyButton.textContent = "Copied";
+                        } catch (_) {
+                            const range = document.createRange();
+                            range.selectNodeContents(passwordValue);
+                            const selection = window.getSelection();
+                            if (selection) { selection.removeAllRanges(); selection.addRange(range); }
+                            copyButton.textContent = "Select and copy";
+                        }
+                    });
+                    credentialPanel.append(passwordLabel, passwordValue, copyButton);
+                    messageBox.appendChild(credentialPanel);
+                }
+                // Clear personal/account form fields without hiding the success panel.
+                ["adminFullName", "adminUsername", "adminEmail", "adminPassword"].forEach(function(id) {
+                    const input = document.getElementById(id);
+                    if (input) input.value = "";
+                });
+                const roleSelect = document.getElementById("adminRole");
+                if (roleSelect) roleSelect.value = "";
+                const patientSelectAfterCreate = document.getElementById("adminPatientRecord");
+                if (patientSelectAfterCreate) patientSelectAfterCreate.value = "";
+                updateAdminPatientRecordVisibility();
                 await loadAdminUsers();
 
             } catch (error) {
@@ -8778,6 +9912,27 @@ let currentCTSeriesId =
 
         }
 
+        function filterAdminUsers() {
+            const search = (document.getElementById("adminUserSearch")?.value || "").trim().toLowerCase();
+            const role = (document.getElementById("adminUserRoleFilter")?.value || "").trim().toLowerCase();
+            const tableBody = document.getElementById("adminUsersTableBody");
+            const message = document.getElementById("adminUserFilterMessage");
+            if (!tableBody) return;
+            const rows = Array.from(tableBody.querySelectorAll("tr")).filter(function(row) { return row.dataset.userId !== undefined; });
+            let visible = 0;
+            rows.forEach(function(row) {
+                const matchesUserId = !search || row.dataset.userId.includes(search);
+                const matchesRole = !role || row.dataset.userRole === role;
+                const show = matchesUserId && matchesRole;
+                row.style.display = show ? "" : "none";
+                if (show) visible++;
+            });
+            if (message) {
+                message.style.display = rows.length ? "block" : "none";
+                message.textContent = rows.length ? ("Showing " + visible + " of " + rows.length + " user(s).") : "";
+            }
+        }
+
         async function loadAdminUsers() {
 
             const tableBody =
@@ -8789,7 +9944,7 @@ let currentCTSeriesId =
 
                 tableBody.innerHTML = `
                     <tr>
-                        <td colspan="5"
+                        <td colspan="7"
                             style="text-align:center; padding:30px; color:#991b1b;">
                             Only Administrator can view users.
                         </td>
@@ -8801,7 +9956,7 @@ let currentCTSeriesId =
 
             tableBody.innerHTML = `
                 <tr>
-                    <td colspan="5"
+                    <td colspan="7"
                         style="text-align:center; padding:30px;">
                         Loading users...
                     </td>
@@ -8830,7 +9985,7 @@ let currentCTSeriesId =
 
                     tableBody.innerHTML = `
                         <tr>
-                            <td colspan="5"
+                            <td colspan="7"
                                 style="text-align:center; padding:30px;">
                                 No users found.
                             </td>
@@ -8849,27 +10004,49 @@ let currentCTSeriesId =
                             ? "status"
                             : "status status-error";
 
-                    tableBody.innerHTML += `
-                        <tr>
-                            <td>${escapeHtml(user.full_name)}</td>
-                            <td>${escapeHtml(user.username)}</td>
-                            <td>${escapeHtml(user.email)}</td>
-                            <td>${escapeHtml(user.role)}</td>
-                            <td>
-                                <span class="${statusClass}">
-                                    ${escapeHtml(user.account_status)}
-                                </span>
-                            </td>
-                        </tr>
-                    `;
+                    const row = document.createElement("tr");
+                    row.dataset.userId = String(user.username || "").toLowerCase();
+                    row.dataset.userRole = String(user.role || "").toLowerCase();
+                    const values = [user.full_name, user.username, user.email, user.role];
+                    values.forEach(function(value) {
+                        const cell = document.createElement("td");
+                        cell.textContent = value == null ? "—" : String(value);
+                        row.appendChild(cell);
+                    });
+                    const statusCell = document.createElement("td");
+                    const statusBadge = document.createElement("span");
+                    statusBadge.className = statusClass;
+                    statusBadge.textContent = user.account_status || "UNKNOWN";
+                    statusCell.appendChild(statusBadge);
+                    row.appendChild(statusCell);
+
+                    const passwordStatusCell = document.createElement("td");
+                    const passwordBadge = document.createElement("span");
+                    passwordBadge.className = "status";
+                    passwordBadge.textContent = user.password_status || "Password set";
+                    passwordStatusCell.appendChild(passwordBadge);
+                    row.appendChild(passwordStatusCell);
+
+                    const actionCell = document.createElement("td");
+                    const resetButton = document.createElement("button");
+                    resetButton.type = "button";
+                    resetButton.className = "btn btn-secondary btn-small";
+                    resetButton.textContent = "Reset password";
+                    resetButton.addEventListener("click", function() {
+                        openAdminPasswordReset(user.id, user.username, user.full_name);
+                    });
+                    actionCell.appendChild(resetButton);
+                    row.appendChild(actionCell);
+                    tableBody.appendChild(row);
 
                 });
+                filterAdminUsers();
 
             } catch (error) {
 
                 tableBody.innerHTML = `
                     <tr>
-                        <td colspan="5"
+                        <td colspan="7"
                             style="text-align:center; padding:30px; color:#991b1b;">
                             ${escapeHtml(error.message)}
                         </td>
@@ -8889,6 +10066,84 @@ let currentCTSeriesId =
                 .replace(/"/g, "&quot;")
                 .replace(/'/g, "&#039;");
 
+        }
+
+
+        function openAdminPasswordReset(userId, username, fullName) {
+            if (!isAdminRole()) {
+                alert("Only an Administrator can reset passwords.");
+                return;
+            }
+            const modal = document.getElementById("adminPasswordResetModal");
+            const userIdInput = document.getElementById("adminPasswordResetUserId");
+            const description = document.getElementById("adminPasswordResetDescription");
+            const form = document.getElementById("adminPasswordResetForm");
+            const message = document.getElementById("adminPasswordResetMessage");
+            if (!modal || !userIdInput || !form) return;
+            userIdInput.value = String(userId);
+            description.textContent = "Set a new temporary password for " + (fullName || username || "this account") + " (" + username + "). The existing password cannot be viewed.";
+            form.reset();
+            if (message) { message.style.display = "none"; message.textContent = ""; }
+            modal.style.display = "flex";
+            document.getElementById("adminResetNewPassword").focus();
+        }
+
+        function closeAdminPasswordReset() {
+            const modal = document.getElementById("adminPasswordResetModal");
+            if (modal) modal.style.display = "none";
+            const form = document.getElementById("adminPasswordResetForm");
+            if (form) form.reset();
+            const message = document.getElementById("adminPasswordResetMessage");
+            if (message) { message.style.display = "none"; message.textContent = ""; }
+        }
+
+        async function submitAdminPasswordReset(event) {
+            event.preventDefault();
+            if (!isAdminRole()) return;
+            const userId = document.getElementById("adminPasswordResetUserId").value;
+            const password = document.getElementById("adminResetNewPassword").value;
+            const confirmation = document.getElementById("adminResetConfirmPassword").value;
+            const message = document.getElementById("adminPasswordResetMessage");
+            const button = document.getElementById("adminPasswordResetSubmit");
+            const showMessage = function(text, isError) {
+                if (!message) return;
+                message.style.display = "block";
+                message.textContent = text;
+                message.style.background = isError ? "#fee2e2" : "#dcfce7";
+                message.style.color = isError ? "#991b1b" : "#166534";
+            };
+            if (password.length < 8) { showMessage("Password must contain at least 8 characters.", true); return; }
+            if (password !== confirmation) { showMessage("The passwords do not match.", true); return; }
+            if (button) { button.disabled = true; button.textContent = "Resetting..."; }
+            try {
+                const response = await apiFetch("/api/admin/users/" + encodeURIComponent(userId) + "/reset-password", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ password: password })
+                });
+                const result = await response.json();
+                if (!response.ok) throw new Error(typeof result.detail === "string" ? result.detail : "Could not reset password.");
+                showMessage("Password reset successfully. New temporary password:", false);
+                const secret = document.createElement("code");
+                secret.textContent = password;
+                secret.style.cssText = "display:block;margin:10px 0;padding:10px;background:#fff;border:1px solid #bbf7d0;border-radius:6px;user-select:all;";
+                const copy = document.createElement("button");
+                copy.type = "button";
+                copy.className = "btn btn-secondary btn-small";
+                copy.textContent = "Copy password";
+                copy.addEventListener("click", async function() {
+                    try { await navigator.clipboard.writeText(password); copy.textContent = "Copied"; }
+                    catch (_) { const range = document.createRange(); range.selectNodeContents(secret); const selection = window.getSelection(); if (selection) { selection.removeAllRanges(); selection.addRange(range); } copy.textContent = "Select and copy"; }
+                });
+                message.append(secret, copy);
+                document.getElementById("adminResetNewPassword").value = "";
+                document.getElementById("adminResetConfirmPassword").value = "";
+                await loadAdminUsers();
+            } catch (error) {
+                showMessage(error.message || "Could not reset password.", true);
+            } finally {
+                if (button) { button.disabled = false; button.textContent = "Reset password"; }
+            }
         }
 
         /* =====================================================
@@ -9038,9 +10293,21 @@ let currentCTSeriesId =
             const resultSection = document.getElementById("brainCtHemorrhageResultSection");
             const resultBox = document.getElementById("brainCtHemorrhageResult");
             const file = input && input.files ? input.files[0] : null;
+            const patientSelect = document.getElementById("imagePatient");
+            const selectedPatientId = patientSelect && patientSelect.value ? Number(patientSelect.value) : null;
+            const selectedPatientOption = patientSelect && patientSelect.selectedIndex >= 0
+                ? patientSelect.options[patientSelect.selectedIndex] : null;
+            const selectedPatientName = selectedPatientOption ? selectedPatientOption.textContent.trim() : "";
+            const studyDateInput = document.getElementById("imageStudyDate");
+            const selectedStudyDate = studyDateInput && studyDateInput.value
+                ? studyDateInput.value : new Date().toISOString().slice(0, 10);
 
             if (!file) {
                 if (status) status.textContent = "Please select a JPG, JPEG, or PNG brain CT image first.";
+                return;
+            }
+            if (!selectedPatientId) {
+                if (status) status.textContent = "Select a patient above before analyzing so the Brain CT report can be linked to that patient's report history.";
                 return;
             }
             if (/mri/i.test(file.name)) {
@@ -9077,6 +10344,28 @@ let currentCTSeriesId =
                 if (!response.ok) {
                     throw new Error(result.detail || result.message || ("Request failed with HTTP " + response.status));
                 }
+
+                // Create a dedicated study for this Brain CT slice so the saved
+                // report appears under the correct patient in Report History.
+                const studyResponse = await apiFetch("/api/studies", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        patient_id: selectedPatientId,
+                        study_type: "2D Brain CT Hemorrhage",
+                        study_date: selectedStudyDate
+                    })
+                });
+                const studyResult = await studyResponse.json();
+                if (!studyResponse.ok) {
+                    throw new Error(studyResult.detail || "Prediction completed, but a Brain CT study could not be created for report history.");
+                }
+                const brainCtStudyId = Number(studyResult.study_id || studyResult.id);
+                if (!Number.isInteger(brainCtStudyId) || brainCtStudyId <= 0) {
+                    throw new Error("The backend did not return a valid Brain CT study ID.");
+                }
+                currentStudyId = brainCtStudyId;
+                localStorage.setItem("currentStudyId", String(brainCtStudyId));
 
                 const predictionObject = (result.prediction && typeof result.prediction === "object")
                     ? result.prediction : result;
@@ -9124,6 +10413,40 @@ let currentCTSeriesId =
                         priority: "Manual Review",
                         reason: "The backend did not return a triage result. Qualified review is required."
                     };
+                // Do not put large base64 overlays into localStorage. Reports need
+                // only compact explanation metadata; the live result keeps its images.
+                const compactExplanation = {
+                    method: explanation.method || "Grad-CAM",
+                    note: explanation.note || "",
+                    candidate_region_box_xyxy: Array.isArray(explanation.candidate_region_box_xyxy)
+                        ? explanation.candidate_region_box_xyxy : []
+                };
+                const compactBrainCtResult = {
+                    studyId: brainCtStudyId,
+                    patientId: selectedPatientId,
+                    patientName: selectedPatientName.includes(" - ")
+                        ? selectedPatientName.split(" - ").slice(1).join(" - ")
+                        : selectedPatientName,
+                    patientCode: selectedPatientName.includes(" - ")
+                        ? selectedPatientName.split(" - ")[0]
+                        : String(selectedPatientId),
+                    studyDate: selectedStudyDate,
+                    filename: file.name,
+                    generatedAt: new Date().toLocaleString(),
+                    model: result.model || { name: "BrainCTCNN", architecture: "2D grayscale CNN" },
+                    input: result.input || { size: [224, 224] },
+                    prediction: {
+                        class: predicted,
+                        confidence: predictionObject.confidence ?? result.confidence,
+                        probability_no_hemorrhage: predictionObject.probability_no_hemorrhage,
+                        probability_hemorrhage: predictionObject.probability_hemorrhage
+                    },
+                    probabilities: rawProbabilities,
+                    explanation: compactExplanation,
+                    triage: triage,
+                    clinical_note: result.clinical_note || "Research-only output for a single 2D slice. This is not a diagnosis and requires qualified clinical review."
+                };
+                localStorage.setItem("latestBrainCtHemorrhageResult", JSON.stringify(compactBrainCtResult));
                 const priority = String(triage.priority || "Manual Review");
                 const priorityLower = priority.toLowerCase();
                 const triageAccent = priorityLower.includes("high") ? "#b91c1c"
@@ -9175,7 +10498,7 @@ let currentCTSeriesId =
                         <p style="margin-top:12px;color:#92400e;font-size:13px;line-height:1.6;">⚠️ Triage is a research workflow label, not a medical diagnosis or a clinical urgency assessment. A qualified clinician must review the scan and clinical information. Do not use this result to rule out hemorrhage.</p>
                     </div>`;
 
-                if (status) status.textContent = "Analysis and explanation request completed.";
+                if (status) status.textContent = "Analysis completed and linked to Brain CT Study #" + brainCtStudyId + ". Open Reports to generate and save the draft.";
             } catch (error) {
                 if (status) status.textContent = "Analysis failed: " + (error.message || "Unknown error");
                 if (resultBox) {
@@ -9198,6 +10521,40 @@ let currentCTSeriesId =
         );
 
     </script>
+
+
+    <div id="adminPasswordResetModal" role="dialog" aria-modal="true" aria-labelledby="adminPasswordResetTitle"
+         style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.65);z-index:9999;align-items:center;justify-content:center;padding:20px;">
+        <div style="width:100%;max-width:560px;background:#fff;border-radius:16px;padding:28px;box-shadow:0 20px 60px rgba(0,0,0,.25);">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+                <h2 id="adminPasswordResetTitle" style="margin-bottom:10px;">Reset user password</h2>
+                <button type="button" class="btn btn-secondary" onclick="closeAdminPasswordReset()" aria-label="Close reset dialog">✕</button>
+            </div>
+            <p id="adminPasswordResetDescription" style="color:#64748b;margin:0 0 18px;"></p>
+            <form id="adminPasswordResetForm" onsubmit="submitAdminPasswordReset(event)">
+                <input type="hidden" id="adminPasswordResetUserId">
+                <div class="form-group">
+                    <label for="adminResetNewPassword">New temporary password</label>
+                    <div class="password-input-wrap">
+                        <input id="adminResetNewPassword" type="password" minlength="8" autocomplete="new-password" required placeholder="Minimum 8 characters">
+                        <button type="button" class="password-toggle" onclick="togglePasswordVisibility('adminResetNewPassword', this)">Show</button>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="adminResetConfirmPassword">Confirm new password</label>
+                    <div class="password-input-wrap">
+                        <input id="adminResetConfirmPassword" type="password" minlength="8" autocomplete="new-password" required placeholder="Re-enter password">
+                        <button type="button" class="password-toggle" onclick="togglePasswordVisibility('adminResetConfirmPassword', this)">Show</button>
+                    </div>
+                </div>
+                <div id="adminPasswordResetMessage" role="status" style="display:none;margin:12px 0;padding:12px;border-radius:8px;"></div>
+                <div style="display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;margin-top:18px;">
+                    <button type="button" class="btn btn-secondary" onclick="closeAdminPasswordReset()">Cancel</button>
+                    <button type="submit" class="btn btn-primary" id="adminPasswordResetSubmit">Reset password</button>
+                </div>
+            </form>
+        </div>
+    </div>
 
 </body>
 
